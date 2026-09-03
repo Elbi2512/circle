@@ -1,0 +1,23 @@
+{
+    "configurations": [
+        {
+            "name": "WSL",
+            "includePath": [
+                "/home/lbijn/circle/include",
+                "/home/lbijn/circle/include/circle",
+                "/home/lbijn/circle/include/circle/fs",
+                "/home/lbijn/circle/include/circle/fs/fat",
+                "${workspaceFolder}/**"
+            ],
+            "defines": [
+                "ARM_ALLOW_MULTI_CORE",
+                "RASPPI=3"
+            ],
+            "compilerPath": "/usr/bin/arm-none-eabi-g++",
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-gcc-arm"
+        }
+    ],
+    "version": 4
+}

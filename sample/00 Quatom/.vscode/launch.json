@@ -1,0 +1,25 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Circle in QEMU",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/kernel7.elf",
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb-multiarch",
+            "miDebuggerServerAddress": "127.0.0.1:1234",
+            "targetArchitecture": "arm",
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": false,
+            "setupCommands": [
+                {
+                    "text": "set architecture arm"
+                },
+                {
+                    "text": "break main"
+                }
+            ]
+        }
+    ]
+}
