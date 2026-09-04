@@ -1,20 +1,30 @@
 README
 
-First blink 5 times to show the image was loaded right. Write character set to
-screen. Write some logging messages to screen or UART. debug_hexdump() of the
-starting bytes of the ATAG structure at 0x100. Show usage of assert() and
-stack-trace.
+The is my bet on runniing an Acorn Atom Emulator. The code is a decomposition of Tom Walkers version
+and shaped for effective usasage on a Pico Zero 2W
 
-You can create a file cmdline.txt like this on the SD(HC) card to change the
-frame buffer size:
+On the HDMI there are four Atom's running, each with their own space. Select the core with F1-F4.
+Full screen of a core can be done by using F5-F8. Keep in mind that in practice, thees key's only switches 
+the attached keyboard to that particular core.
+F12 is a reset of the selected Core.
 
-width=640 height=480
+By default the Atom runs at Atom speed (1MHz) and uses about 17% of a core. F11 however adds full throttle 
+and will speed the Atom up to an impressive 5MHz. Even then, the Vsync will run at 50Hz, so the keyboard is still haneled 
+in a civelized way and not generating a bunch of keystrokes with only one press.
 
-In the same file you can control the logging feature by these options (append
-them to the same line):
+Each core has a MMC based file system. From a technical point of view: core 0 will thake care of this, same as for the display and keyboardhandling. Since eache core share some 256 bytes memory pages, I adopted the BBC nameing Jim, Fred and Sheila and devoded the names to the people who were key in NL to the Acorn Atom: Gerard Borghaerts (GERA), Roland Leurs (ROLA), Kees van Oss (KEVO) and Tom Walker (TOWA).
 
-logdev=ttyS1 loglevel=4
+The PS/2 keboard is excatcly als a PS/2 keyboard, but mapped in a clever way: eg. the @ is translated in the according 
+Atom Key matrix. The TAB is the copy and the `above the tab is a CTRL L, handy to clean the screen..
 
-(write logging messages to UART now, default is to screen ("tty1"), the loglevel
-controls the amount of messages produced (0: only panic, 1: also errors, 2: also
-warnings, 3: also notices, 4: also debug output (default))
+On the right side of the screen, you not only see the Core load of each core, but there is also a virtual printer window: 
+if you switch on the printer function (CTRL B/CTRL C), the output is placed overthere and will scroll, like a classic paper feeded calculator. You can use PRint screen of SHIFT printscreen to enable, disable this funciton for the particualr core.
+For debug the Atom, there is a #defne debug, which is by default off.
+
+There are many more trics, like shared ram between the core's and a time function. This is only the start of a new journey.
+
+Big thanks to the maker and designers of
+- Raspberry PI Zero 2W
+- The clever Circle guy
+- Roland, for his bright idea's
+- Acorn Ltd, who is responsible for my career in the IT, to come up with the Atom.

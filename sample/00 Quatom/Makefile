@@ -2,7 +2,7 @@ CIRCLEHOME = /home/lbijn/circle
 
 INCLUDE += -I $(CIRCLEHOME)/addon -I $(CIRCLEHOME)/addon/fatfs
 
-OBJS = main.o kernel.o atom.o atomemulator.o via6522.o pia8255.o AtomMC.o AtomVideo.o debugger.o textconsole.o
+OBJS = main.o kernel.o atom.o atomemulator.o via6522.o pia8255.o AtomMC.o AtomVideo.o textconsole.o
 
 ADDON_DIR = $(CIRCLEHOME)/addon/SDCard
 

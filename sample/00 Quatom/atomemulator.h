@@ -1,4 +1,5 @@
 #pragma once
+// #define debugger
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -8,8 +9,9 @@
 #include "via6522.h"
 #include "AtomMC.h"
 #include "AtomVideo.h"
+#ifdef debugger
 #include "debugger.h"
-
+#endif
 // ---------------------------------------------------------------------------
 // Geheugen- en ROM-constanten
 // ---------------------------------------------------------------------------
@@ -203,8 +205,9 @@ private:
     CVia6522   m_Via;
     CAtomMC    m_Mmc;
     CAtomVideo m_Video;
+    #ifdef debugger
     CDebugger  m_Debugger;
-
+#endif
     // Toetsenbord mapping
     uint8_t m_aKeyLookup[128];
     uint8_t m_aKeyState[128];

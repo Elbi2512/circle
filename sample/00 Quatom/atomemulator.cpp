@@ -8,14 +8,16 @@
 #include <circle/logger.h>
 #include "atomemulator.h"
 #include "AtomMC.h"
+#ifdef debugger
 #include "debugger.h"
+#endif
 
 #include <string.h> // Voor memset
 #include <stdlib.h> // Voor rand
 #include <circle/types.h>
 #define RR_bit_set(flag) ((m_RR_enables & (flag)) != 0)
 extern CWelcomeAnimation g_WelcomeAnim;
-
+#ifdef debugger
 const unsigned char Invader[4886] = {
     0x53, 0x41, 0x43, 0x45, 0x49, 0x4E, 0x56, 0x41, 0x44, 0x45, 0x52, 0x53,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x29, 0x86, 0xCE, 0x00, 0x13, 0x0D, 0x00,
@@ -425,7 +427,7 @@ const unsigned char Invader[4886] = {
     0x20, 0x20, 0x20, 0x39, 0x38, 0x30, 0x0D, 0xE2, 0x20, 0x90, 0x12, 0x00,
     0x20, 0xC0, 0x30, 0xB0, 0x00, 0x62, 0x00, 0x00, 0x50, 0x50, 0x40, 0x82,
     0x22, 0x00};
-
+#endif
 // --- Bare-metal Stubs voor POSIX File I/O ---
 typedef void FILE;
 
@@ -502,22 +504,6 @@ CAtomEmulator::~CAtomEmulator()
     m_pRom = nullptr;
   }
 }
-/*
-void CAtomEmulator::SetKernel(CKernel *pKernel)
-{
-  m_pKernel = pKernel;
-}
-
-bool CAtomEmulator::HasVRAMChanged()
-{
-  return m_bVRAMChanged;
-}
-
-void CAtomEmulator::ResetVRAMChanged()
-{
-  m_bVRAMChanged = false;
-}
-  */
 
 void CAtomEmulator::InitKeymap()
 {
@@ -630,7 +616,9 @@ $FF75
 
 #F000: Atom OS / Kernel
   */
+#ifdef debugger
   memcpy(&m_pRam[0x2900], Invader + 0X16, sizeof(Invader) - 0x16);
+#endif
 }
 
 void CAtomEmulator::SetDosRomPtr()
@@ -696,9 +684,10 @@ void CAtomEmulator::ResetROM()
 bool CAtomEmulator::Initialize(unsigned nCoreId)
 {
   m_nCoreId = nCoreId;
-
+#ifdef debugger
   m_Debugger.SetEmulator(this);
   m_Debugger.SetDebug(false);
+#endif
 
   InitKeymap();
   InitMem();
@@ -761,7 +750,9 @@ uint8_t CAtomEmulator::ReadMem(uint16_t addr)
   if (addr >= 0x0400 && addr <= 0x07FF)
   {
     val = g_SharedAtomPages[addr - 0x0400]; // Correcte offset met addr!
+#ifdef debugger
     m_Debugger.DebugRead(addr, val);
+#endif
     return val;
   }
 
@@ -957,15 +948,17 @@ uint8_t CAtomEmulator::ReadMem(uint16_t addr)
   {
     val = (m_pAKernelPtr != nullptr) ? m_pAKernelPtr[addr & 0x0FFF] : 0xFF;
   }
-
+#ifdef debugger
   m_Debugger.DebugRead(addr, val);
+#endif
   return val;
 }
 void CAtomEmulator::WriteMem(uint16_t addr, uint8_t val)
 {
+#ifdef debugger
   m_Debugger.DebugWrite(addr, val);
+#endif
   m_writec[addr] = 31;
-
   // 1. Gedeeld geheugen tussen cores ($0400 - $07FF)
   if (addr >= 0x0400 && addr <= 0x07FF)
   {
@@ -1046,27 +1039,31 @@ void CAtomEmulator::WriteMem(uint16_t addr, uint8_t val)
   }
 
   // 7. PIA 8255 ($B000 - $B3FF)
+  // Beta 00.9 -> Als er specifiek geschreven wordt naar Port A (#B000), update CSS (Color Set Select)
+  // 7. PIA 8255 ($B000 - $B3FF)
   // 7. PIA 8255 ($B000 - $B3FF)
   if (i == 0xB000)
   {
-    uint8_t oldMode = m_Pia.GetGfxMode();
+    uint8_t oldMode = m_nGfxMode;
 
     m_Pia.Write(addr, val);
 
-    uint8_t newMode = m_Pia.GetGfxMode();
-
-    // Als de grafische modus daadwerkelijk omschakelt:
-    if (newMode != oldMode)
+    // Alleen als Bit 7 hoog is (#D0, #F0), of als we expliciet naar 0x00 schrijven
+    // (voorkomt dat toetsenbordscans 0x01..0x09 de mode wiebelen)
+    if (val & 0x80)
     {
-      m_nGfxMode = newMode;
+      m_nGfxMode = m_Pia.GetGfxMode();
+    }
+    else if (val == 0x00 && m_pc >= 0xC000)
+    {
+      // Terug naar tekst via CLEAR 0 / Reset
+      m_nGfxMode = 0;
+    }
 
-      // 1. Schaduwbuffer voor tekstmodus resetten naar 0xFF
+    if (m_nGfxMode != oldMode)
+    {
       memset(m_LastTextVRAM, 0xFF, sizeof(m_LastTextVRAM));
-
-      // 2. Schaduwbuffer voor grafische modus in atom.cpp resetten naar 0xFF
-      //    (Hierdoor worden VRAM 0x00 waarden direct als dirty gezien en getekend)
       CAtomRunner::Get()->InvalidateQuadrantVRAM(m_nCoreId);
-
       m_bFullRedrawNeeded = true;
       m_bVRAMChanged = true;
     }
@@ -1158,7 +1155,8 @@ void CAtomEmulator::Reset()
   m_Via.Reset();
   m_Pia.Reset();
   m_Mmc.Reset();
-
+  m_nGfxMode = 0; // <--- Zorg dat de emulator hier netjes op tekst begint
+  m_nCss = 0;
   ResetROM();
   m_pc = ReadMem(0xFFFC) | (ReadMem(0xFFFD) << 8);
   m_p.i = 1;
@@ -1219,21 +1217,19 @@ void CAtomEmulator::Update(void)
   // -------------------------------------------------------------------------
   // 2. Scherm- en animatielogica
   // -------------------------------------------------------------------------
-  // Zolang de animatie draait, tekenen we niet, maar BEWAREN we de redraw-vlag
   if (g_WelcomeAnim.IsPlaying(m_nCoreId))
   {
     m_bFullRedrawNeeded = true;
     return;
   }
 
-  // Als de animatie net gestopt is (m_bFullRedrawNeeded == true), direct geforceerd tekenen
   if (m_bVRAMChanged || ++m_fskipcount >= 10 || m_bFullRedrawNeeded)
   {
     m_fskipcount = 0;
 
     if (m_nGfxMode == 0)
     {
-      // ★★★ ALLEEN IN WINDOWED MODE: Tekst direct naar HDMI framebuffer schrijven ★★★
+      // Tekst direct naar HDMI framebuffer schrijven (alleen windowed)
       extern volatile bool g_bFullscreenMode;
       if (!g_bFullscreenMode)
       {
@@ -1272,36 +1268,33 @@ void CAtomEmulator::Update(void)
     }
     else // grafische modus 1..15
     {
-      // -----------------------------------------------------------------------
-      // Vertaal Atom software modus (0..4) naar MC6847 VDG hardware case (0..15)
-      // -----------------------------------------------------------------------
       u8 vdgMode = m_nGfxMode;
       switch (m_nGfxMode)
       {
       case 1:
         vdgMode = 1;
-        break; // 64x64, 4 kleuren (16 bytes/regel)
+        break; // 64x64, 4 kleuren
       case 2:
         vdgMode = 7;
-        break; // 128x96, 2 kleuren (16 bytes/regel)
+        break; // 128x96, 2 kleuren
       case 3:
         vdgMode = 13;
-        break; // 128x192, 4 kleuren (32 bytes/regel)
+        break; // 128x192, 4 kleuren
       case 4:
         vdgMode = 15;
-        break; // 256x192, 2 kleuren (32 bytes/regel - CLEAR 4)
+        break; // 256x192, 2 kleuren (CLEAR 4)
       default:
-        vdgMode = m_nGfxMode; // Directe VDG mode via #B000 (zoals 15 bij #F0)
+        vdgMode = m_nGfxMode;
         break;
       }
 
-      // ★★★ DIT MOET ALTIJD DRAAIEN (zowel in windowed als fullscreen!) ★★★
       for (int line = 0; line < 192; line++)
       {
         m_Video.RenderLine(line, m_pRam, vdgMode, m_nCss);
       }
+
       m_bFullRedrawNeeded = false;
-      m_bVRAMChanged = true;
+      // m_bVRAMChanged NIET op true zetten, anders blijft de render-lus oneindig loopen.
     }
   }
 }
@@ -1436,7 +1429,7 @@ void CAtomEmulator::Exec6502(int linenum, int cpl)
     }
   };
 
-  m_nGfxMode = m_Pia.GetGfxMode();
+  // m_nGfxMode = m_Pia.GetGfxMode(); // to much love will kill you in the end...
 
   int totalBudget = linenum * cpl;
   static u32 s_nFrameCounter = 0;
