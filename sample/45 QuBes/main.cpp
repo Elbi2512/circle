@@ -3,7 +3,7 @@
 //
 // Circle - A C++ bare metal environment for Raspberry Pi
 // Copyright (C) 2014  R. Stange <rsta2@o2online.de>
-// 
+//
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
@@ -20,28 +20,28 @@
 #include "kernel.h"
 #include <circle/startup.h>
 
-int main (void) 
+int main(void)
 {
 	// cannot return here because some destructors used in CKernel are not implemented
 
 	CKernel Kernel;
-	if (!Kernel.Initialize ())
+	if (!Kernel.Initialize())
 	{
-		halt ();
+		halt();
 		return EXIT_HALT;
 	}
-	
-	TShutdownMode ShutdownMode = Kernel.Run ();
+
+	TShutdownMode ShutdownMode = Kernel.Run();
 
 	switch (ShutdownMode)
 	{
 	case ShutdownReboot:
-		reboot ();
+		reboot();
 		return EXIT_REBOOT;
 
 	case ShutdownHalt:
 	default:
-		halt ();
+		halt();
 		return EXIT_HALT;
 	}
 }

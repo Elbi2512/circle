@@ -1,5 +1,5 @@
-#ifndef _beeb_h
-#define _beeb_h
+#ifndef _BEEB_H
+#define _BEEB_H
 
 #ifndef ARM_ALLOW_MULTI_CORE
 #define ARM_ALLOW_MULTI_CORE
@@ -14,9 +14,16 @@
 #include <circle/logger.h>
 #include <fatfs/ff.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include "bbc_machine.h"
-#include "sn76489.h"
+#include "bbc_cpu.h"
+#include "bbc_memory.h"
 #include "roms.h"
+#ifdef __cplusplus
+}
+#endif
 
 #define BBC_BUF_W              640
 #define BBC_BUF_H              480
@@ -57,7 +64,7 @@ private:
     bool MountSDDiskImage(void);
     void RenderBBCFrame(void);
 
-    // Disk callbacks voor bbc_machine
+    // Disk callbacks
     static int DiskReadSector(void *user_ctx, uint8_t drive, uint8_t track, uint8_t sector,
                               uint8_t side, uint8_t density, uint8_t *buf, uint16_t *len);
     static int DiskWriteSector(void *user_ctx, uint8_t drive, uint8_t track, uint8_t sector,

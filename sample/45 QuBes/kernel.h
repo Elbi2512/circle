@@ -10,14 +10,15 @@
 #include <circle/interrupt.h>
 #include <circle/timer.h>
 #include <circle/logger.h>
-#include <circle/usb/usbhcidevice.h>
-#include <circle/bcmframebuffer.h>
 #include <circle/sched/scheduler.h>
-#include <circle/net/wlanadapter.h>
-#include <circle/net/netsubsystem.h>
-#include <circle/net/wpasupplicant.h>
+#include <circle/usb/usbhcidevice.h>
 #include <SDCard/emmc.h>
 #include <fatfs/ff.h>
+#include <wlan/bcm4343.h>
+#include <wlan/hostap/wpa_supplicant/wpasupplicant.h>
+#include <circle/net/netsubsystem.h>
+#include <circle/types.h>
+#include <circle/fs/fat/fatfs.h>
 
 #include "beeb.h"
 
@@ -52,7 +53,7 @@ private:
     CEMMCDevice         m_EMMC;
     CUSBHCIDevice       m_USBHCI;
     CScheduler          m_Scheduler;
-    CWLANAdapter        m_WLAN;
+ //   CWLANAdapter        m_WLAN;
     CNetSubSystem       m_Net;
     CWPASupplicant      m_WPASupplicant;
 

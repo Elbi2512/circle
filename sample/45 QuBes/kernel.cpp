@@ -23,7 +23,7 @@ CKernel::CKernel(void)
     m_Logger(m_Options.GetLogLevel(), &m_Timer),
     m_EMMC(&m_Interrupt, &m_Timer, &m_ActLED),
     m_USBHCI(&m_Interrupt, &m_Timer, TRUE),
-    m_WLAN(FIRMWARE_PATH),
+   // m_WLAN(FIRMWARE_PATH),
     m_Net(0, 0, 0, 0, DEFAULT_HOSTNAME, NetDeviceTypeWLAN),
     m_WPASupplicant(CONFIG_FILE),
     m_BeebRunner(&m_FrameBuffer, &m_Timer, &m_DeviceNameService, CMemorySystem::Get()),
@@ -77,9 +77,9 @@ boolean CKernel::Initialize(void)
     // 6. Wi-Fi & Netwerk stack (indien jumper niet geplaatst is)
     if (!m_bJumperPresent)
     {
-        if (bOK) bOK = m_WLAN.Initialize();
-        if (bOK) bOK = m_Net.Initialize(FALSE);
-        if (bOK) bOK = m_WPASupplicant.Initialize();
+        // if (bOK) bOK = m_WLAN.Initialize();
+        // if (bOK) bOK = m_Net.Initialize(FALSE);
+        // if (bOK) bOK = m_WPASupplicant.Initialize();
     }
 
     // 7. Initialiseer Beeb Runner (laadt ROMs, disk image en start multi-core)
@@ -112,7 +112,7 @@ TShutdownMode CKernel::Run(void)
             if (nRetries % 20 == 0)
             {
                 m_Logger.Write(FromKernel, LogNotice, "Wachten op verbinding... (%u sec)", nRetries / 10);
-                m_WLAN.DumpStatus();
+   //             m_WLAN.DumpStatus();
             }
 
             if (nRetries >= 300) // 30 seconden time-out
