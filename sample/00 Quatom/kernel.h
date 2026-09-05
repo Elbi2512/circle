@@ -19,7 +19,7 @@
 #include <circle/net/netsubsystem.h>
 #include <circle/types.h>
 #include <circle/fs/fat/fatfs.h>
-//#include <circle/synchronization.h> // Voor vertraging
+// #include <circle/synchronization.h> // Voor vertraging
 
 #include "atom.h"
 
@@ -44,37 +44,35 @@ public:
     unsigned GetCurrentCore(void) { return CMultiCoreSupport::ThisCore(); }
     CAtomEmulator *GetEmulator(unsigned nCore) { return m_AtomRunner.GetEmulator(nCore); }
     CTextConsole *GetConsole(void) { return m_AtomRunner.GetConsole(); }
-//    CNetSubSystem *GetNet(void) { return &m_Net; }
-//    CBcm4343Device *GetWLAN(void) { return &m_WLAN; }
-// Getter om de jumper-status later/elders op te vragen:
-    boolean IsJumperPresent (void) const
+    u8 GetWifiStatus(void) const
     {
-        return m_bJumperPresent;
+        return m_nWifiStatus; // of m_bWifiConnected ? 0 : 1;
     }
 
-  private:
-    CActLED            m_ActLED;
-    CKernelOptions     m_Options;
+private:
+    CActLED m_ActLED;
+    CKernelOptions m_Options;
     CDeviceNameService m_DeviceNameService;
-    CBcmFrameBuffer    m_FrameBuffer;
-    CSerialDevice      m_Serial;
-    CInterruptSystem   m_Interrupt;
-    CTimer             m_Timer;
-    CLogger            m_Logger;
-    CScheduler         m_Scheduler; // <-- Toevoegen vóór apparaten/netwerk
-    CEMMCDevice        m_EMMC;
-    CFATFileSystem     m_FileSystem;
-    CUSBHCIDevice      m_USBHCI;
+    CBcmFrameBuffer m_FrameBuffer;
+    CSerialDevice m_Serial;
+    CInterruptSystem m_Interrupt;
+    CTimer m_Timer;
+    CLogger m_Logger;
+    CScheduler m_Scheduler; // <-- Toevoegen vóór apparaten/netwerk
+    CEMMCDevice m_EMMC;
+    CFATFileSystem m_FileSystem;
+    CUSBHCIDevice m_USBHCI;
 
-    CBcm4343Device     m_WLAN;
-    CNetSubSystem      m_Net;
-    CWPASupplicant     m_WPASupplicant;
+    CBcm4343Device m_WLAN;
+    CNetSubSystem m_Net;
+    CWPASupplicant m_WPASupplicant;
 
-    CAtomRunner        m_AtomRunner;
+    CAtomRunner m_AtomRunner;
     // Member variabele voor de status
-    boolean             m_bJumperPresent;
+    boolean m_bJumperPresent;
+    uint8_t m_nWifiStatus;
 
-    static CKernel    *s_pThis;
+    static CKernel *s_pThis;
 };
 
 #endif

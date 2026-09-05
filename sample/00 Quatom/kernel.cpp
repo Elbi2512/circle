@@ -10,7 +10,6 @@
 #define DRIVE "SD:"
 #define FIRMWARE_PATH DRIVE "/firmware/"
 #define CONFIG_FILE DRIVE "/wpa_supplicant.conf"
-#define JUMPER_PIN 4
 
 static const char FromKernel[] = "kernel";
 
@@ -41,7 +40,6 @@ CKernel::~CKernel(void)
 boolean CKernel::Initialize(void)
 {
     boolean bOK = TRUE;
-    CGPIOPin jumperPin(JUMPER_PIN, GPIOModeInputPullUp);
 
     // 1. Hardware, Interrupts, Serial & Logger
     if (bOK)
@@ -77,19 +75,21 @@ boolean CKernel::Initialize(void)
         bOK = m_USBHCI.Initialize();
     }
 
-    // 5. Jumper controleren (Pin naar GND = Jumper actief)
-    // m_bJumperPresent = (jumperPin.Read() == 0);
-    m_bJumperPresent = 1; // duitsland versie
-
-    // 6. Wi-Fi & Netwerk stack (alleen als jumper NIET geplaatst is)
-    if (!m_bJumperPresent)
+ FILINFO fno;
+    if (f_stat(CONFIG_FILE, &fno) == FR_OK) // DRIVE verwijderd!
     {
-        if (bOK)
-            bOK = m_WLAN.Initialize();
+        m_Logger.Write(FromKernel, LogNotice, "wifi config file found");
+        m_bJumperPresent = FALSE; // FALSE betekent: geen jumper / wel Wi-Fi starten
+        bOK = m_WLAN.Initialize();
         if (bOK)
             bOK = m_Net.Initialize(FALSE);
         if (bOK)
             bOK = m_WPASupplicant.Initialize();
+    }
+    else
+    {
+        m_Logger.Write(FromKernel, LogNotice, "wifi config file not found");
+        m_bJumperPresent = TRUE; // Negeer Wi-Fi in Run()
     }
 
     // 7. Initialiseer Atom Runner direct zodat USB Keyboard hooks op tijd geregistreerd zijn!
@@ -108,7 +108,7 @@ TShutdownMode CKernel::Run(void)
     if (!m_bJumperPresent)
     {
         m_Logger.Write(FromKernel, LogNotice, "Wachten op Wi-Fi en IP-adres via DHCP...");
-
+        m_nWifiStatus = 1;
         unsigned nRetries = 0;
         while (!m_Net.IsRunning())
         {
@@ -133,7 +133,7 @@ TShutdownMode CKernel::Run(void)
             CString IPString;
             m_Net.GetConfig()->GetIPAddress()->Format(&IPString);
             m_Logger.Write(FromKernel, LogNotice, "Wi-Fi verbonden! IP-adres: %s", (const char *)IPString);
-
+            m_nWifiStatus = 0;
             m_Timer.SetTimeZone(120); // CEST (+2)
             m_Logger.Write(FromKernel, LogNotice, "Tijd synchroniseren via NTP (pool.ntp.org)...");
             new CNTPDaemon("nl.pool.ntp.org", &m_Net);

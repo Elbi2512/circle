@@ -890,6 +890,7 @@ void CAtomRunner::KeyStatusHandlerRaw(unsigned char ucModifiers, const unsigned 
       }
       else
       {
+        ClearEntireHDMIFrameBuffer(*s_pThis->m_pFrameBuffer);
         for (int c = 0; c < 4; c++)
         {
           g_SkipCounter[c] = 5;

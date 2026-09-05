@@ -301,27 +301,7 @@ void CPia8255::Write(uint16_t addr, uint8_t val)
   {
   case 0: // $B000 - Port A
     m_PortA = val;
- /*
-    // Bit 7 = A/G (1 = Graphics, 0 = Tekst/Semigraphics)
-    if (val & 0x80)
-    {
-      uint8_t gm = (val >> 4) & 0x07;
-      static const uint8_t s_VdgModeMap[8] = {1, 3, 5, 7, 9, 13, 11, 15};
-      m_nGfxMode = s_VdgModeMap[gm];
-      m_nCss = (val & 0x01); // Bit 0 = CSS
-    }
-    else
-    {
-      // Bit 7 = 0.
-      // Als we in graphics mode zitten: het OS schrijft 0x00..0x09 (scan) en 0x3F (bus release).
-      // Al deze waarden hebben de hoge bits (GM2..GM0) op 0 of 3, maar zijn GEEN mode switch!
-      // In Atom BASIC zet CLEAR 0 het register B000 op 0x00 en wist het scherm.
-      // We negeren elke write met Bit 7 = 0 zolang we in grafische modus zitten,
-      // BEHALVE als het VRAM weer leeggemaakt is (tekst), OF als het expliciet via Reset/CLEAR 0 gaat.
-      //
-      // Om 100% stabiel te zijn: een actieve grafische stand blijft graphics zolang
-      // er niet expliciet een CLEAR 0 / Reset plaatsvindt!
-    } */
+ 
     break;
 
   case 1: // $B001 - Port B

@@ -155,7 +155,7 @@ void CTextConsole::ClearRow(int row)
         return;
 
     // u32 *pFB = (u32 *)m_pFB->GetBuffer();
-    u32 *pFB = (u32 *)(unsigned long)m_pFB->GetBuffer();// 64 bit
+    u32 *pFB = (u32 *)(unsigned long)m_pFB->GetBuffer(); // 64 bit
     if (pFB == nullptr)
         return;
 
@@ -222,7 +222,7 @@ void CTextConsole::ScrollUp()
         return;
 
     // u32 *pFB = (u32 *)m_pFB->GetBuffer();
-   u32 *pFB = (u32 *)(unsigned long)m_pFB->GetBuffer();
+    u32 *pFB = (u32 *)(unsigned long)m_pFB->GetBuffer();
     if (pFB == nullptr)
         return;
 

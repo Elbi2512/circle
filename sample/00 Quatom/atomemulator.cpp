@@ -428,6 +428,61 @@ const unsigned char Invader[4886] = {
     0x20, 0xC0, 0x30, 0xB0, 0x00, 0x62, 0x00, 0x00, 0x50, 0x50, 0x40, 0x82,
     0x22, 0x00};
 #endif
+
+void HandleWifiConfigWrite(u8 val)
+{
+  // Bestandspaden (pas aan naar "SD:/..." als je drive prefixes gebruikt)
+  const char *pTargetFile = "/wpa_supplicant.conf";
+  const char *pSourceFile = "/wpa_supplicant.con";
+
+  if (val == 0x00)
+  {
+    // Verwijder wpa_supplicant.conf
+    FRESULT res = f_unlink(pTargetFile);
+    if (res == FR_OK)
+    {
+      // Bestand succesvol verwijderd
+    }
+    else if (res == FR_NO_FILE)
+    {
+      // Bestand bestond al niet
+    }
+  }
+  else if (val == 0x2A)
+  {
+    // Kopieer wpa_supplicant.con naar wpa_supplicant.conf
+    FIL fSrc, fDst;
+    FRESULT resSrc = f_open(&fSrc, pSourceFile, FA_READ);
+    if (resSrc != FR_OK)
+    {
+      return; // Bronbestand niet gevonden
+    }
+
+    FRESULT resDst = f_open(&fDst, pTargetFile, FA_CREATE_ALWAYS | FA_WRITE);
+    if (resDst != FR_OK)
+    {
+      f_close(&fSrc);
+      return;
+    }
+
+    // Buffer voor het kopiëren
+    u8 buffer[512];
+    UINT bytesRead = 0;
+    UINT bytesWritten = 0;
+
+    while (f_read(&fSrc, buffer, sizeof(buffer), &bytesRead) == FR_OK && bytesRead > 0)
+    {
+      if (f_write(&fDst, buffer, bytesRead, &bytesWritten) != FR_OK || bytesWritten < bytesRead)
+      {
+        break; // Schrijffout
+      }
+    }
+
+    f_sync(&fDst);
+    f_close(&fDst);
+    f_close(&fSrc);
+  }
+}
 // --- Bare-metal Stubs voor POSIX File I/O ---
 typedef void FILE;
 
@@ -552,20 +607,21 @@ void CAtomEmulator::LoadROM(const char *pPath, int Size, int Offset)
     UINT bytesRead = 0;
     res = f_read(&File, &m_pRom[Offset], Size, &bytesRead);
     f_close(&File);
-
-    if (res == FR_OK)
-    {
-      CLogger::Get()->Write("LoadROM", LogNotice, "Succes: %s geladen (%u bytes op 0x%04X)",
-                            fullPath, (unsigned)bytesRead, Offset);
-    }
-    else
-    {
-      CLogger::Get()->Write("LoadROM", LogError, "Leesfout bij bestand %s", fullPath);
-    }
-  }
-  else
-  {
-    CLogger::Get()->Write("LoadROM", LogError, "Kan ROM '%s' niet openen (FatFs Error: %d)", fullPath, (int)res);
+    /*
+        if (res == FR_OK)
+        {
+          CLogger::Get()->Write("LoadROM", LogNotice, "Succes: %s geladen (%u bytes op 0x%04X)",
+                                fullPath, (unsigned)bytesRead, Offset);
+        }
+        else
+        {
+          CLogger::Get()->Write("LoadROM", LogError, "Leesfout bij bestand %s", fullPath);
+        }
+      }
+      else
+      {
+        CLogger::Get()->Write("LoadROM", LogError, "Kan ROM '%s' niet openen (FatFs Error: %d)", fullPath, (int)res);
+      } */
   }
   CTimer::Get()->MsDelay(50);
 }
@@ -705,11 +761,10 @@ bool CAtomEmulator::Initialize(unsigned nCoreId)
   m_Mmc.SetEmulator(this);
   CLogger::Get()->Write("emulator", LogNotice, "Core %u gekoppeld aan AtomMMC map: %s", nCoreId, s_CoreFolderNames[nCoreId]);
   m_Mmc.Initialize(s_CoreFolderNames[nCoreId]);
-
   m_Pia.Initialize();
   Reset();
-
   m_bInitialized = true;
+
   return true;
 }
 
@@ -735,6 +790,7 @@ int CAtomEmulator::RamEnabled(uint16_t addr)
 {
   return ((addr < 0x400) || ((addr >= 0x0400) && (addr < 0x0A00) && (m_main_ramflag > 3)) || ((addr >= 0x0B00) && (addr < 0x2000) && (m_main_ramflag > 3)) || ((addr >= 0x0A00) && (addr < 0x0B00) && (m_main_ramflag > 4)) || ((addr >= 0x2800) && (addr < 0x3C00) && (m_main_ramflag > 0)) || ((addr >= 0x2000) && (addr < 0x2800) && (m_main_ramflag > 1)) || ((addr >= 0x3C00) && (addr < 0x4000) && (m_main_ramflag > 1)) || ((addr >= 0x4000) && (addr < 0x8000) && (m_main_ramflag > 2)) || m_ramrom_enable);
 }
+
 uint8_t CAtomEmulator::ReadMem(uint16_t addr)
 {
   uint8_t val = 0;
@@ -908,6 +964,15 @@ uint8_t CAtomEmulator::ReadMem(uint16_t addr)
         break;
       }
     }
+    else if (addr == 0xBFE3) // enable or disable wifi config write
+    {
+      HandleWifiConfigWrite(val);
+      return 0;
+    }
+    else if (addr == 0xBFE4) // wifi status read
+    {
+      return m_pKernel->GetWifiStatus(); // 0 = verbonden, 1 = niet verbonden
+    }
     else if (m_ramrom_enable)
     {
       switch (addr)
@@ -1062,6 +1127,7 @@ void CAtomEmulator::WriteMem(uint16_t addr, uint8_t val)
 
     if (m_nGfxMode != oldMode)
     {
+      // CLogger::Get()->Write("Mode", LogNotice, "Mode Was: %d, wordt: %d ", oldMode, m_nGfxMode);
       memset(m_LastTextVRAM, 0xFF, sizeof(m_LastTextVRAM));
       CAtomRunner::Get()->InvalidateQuadrantVRAM(m_nCoreId);
       m_bFullRedrawNeeded = true;
@@ -3043,13 +3109,4 @@ void CAtomEmulator::Exec6502(int linenum, int cpl)
   u32 executedIns = m_ins - startIns;
   s_nInstructionCount += executedIns;
   s_nFrameCounter++;
-
-  // if (s_nFrameCounter >= 50)
-  // {
-  //   CLogger::Get()->Write("CPU_SPEED", LogNotice,
-  //       "6502 instructies per seconde: %u (gemiddeld %u per frame, m_cycles rest: %d)",
-  //       s_nInstructionCount, s_nInstructionCount / 50, m_cycles);
-  //   s_nInstructionCount = 0;
-  //   s_nFrameCounter = 0;
-  // }
 }
