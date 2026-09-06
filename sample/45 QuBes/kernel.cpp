@@ -41,7 +41,7 @@ CKernel::~CKernel(void)
 boolean CKernel::Initialize(void)
 {
     boolean bOK = TRUE;
-    CGPIOPin jumperPin(JUMPER_PIN, GPIOModeInputPullUp);
+ //   CGPIOPin jumperPin(JUMPER_PIN, GPIOModeInputPullUp);
 
     // 1. Hardware, Interrupts, Serial & Logger
     if (bOK) bOK = m_Interrupt.Initialize();

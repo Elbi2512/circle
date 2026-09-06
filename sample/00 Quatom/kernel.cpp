@@ -75,7 +75,7 @@ boolean CKernel::Initialize(void)
         bOK = m_USBHCI.Initialize();
     }
 
- FILINFO fno;
+    FILINFO fno;
     if (f_stat(CONFIG_FILE, &fno) == FR_OK) // DRIVE verwijderd!
     {
         m_Logger.Write(FromKernel, LogNotice, "wifi config file found");

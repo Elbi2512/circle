@@ -46,22 +46,31 @@ int CBeebRunner::DiskReadSector(void *user_ctx,
     (void)density;
 
     bbc_circle_disk_ctx_t *ctx = (bbc_circle_disk_ctx_t *)user_ctx;
-    if (!ctx || !ctx->isOpen) return -1;
-    if (track  >= BBC_TRACKS)            return -1;
-    if (sector >= BBC_SECTORS_PER_TRACK) return -1;
-    if (!ctx->is_dsd && side != 0)       return -1;
+    if (!ctx || !ctx->isOpen)
+        return -1;
+    if (track >= BBC_TRACKS)
+        return -1;
+    if (sector >= BBC_SECTORS_PER_TRACK)
+        return -1;
+    if (!ctx->is_dsd && side != 0)
+        return -1;
 
     FSIZE_t offset;
-    if (ctx->is_dsd) {
+    if (ctx->is_dsd)
+    {
         offset = ((track * 2 + side) * BBC_SECTORS_PER_TRACK + sector) * BBC_SECTOR_SIZE;
-    } else {
+    }
+    else
+    {
         offset = (track * BBC_SECTORS_PER_TRACK + sector) * BBC_SECTOR_SIZE;
     }
 
-    if (f_lseek(&ctx->file, offset) != FR_OK) return -1;
+    if (f_lseek(&ctx->file, offset) != FR_OK)
+        return -1;
 
     UINT bytesRead = 0;
-    if (f_read(&ctx->file, buf, BBC_SECTOR_SIZE, &bytesRead) != FR_OK || bytesRead != BBC_SECTOR_SIZE) {
+    if (f_read(&ctx->file, buf, BBC_SECTOR_SIZE, &bytesRead) != FR_OK || bytesRead != BBC_SECTOR_SIZE)
+    {
         return -1;
     }
 
@@ -79,23 +88,33 @@ int CBeebRunner::DiskWriteSector(void *user_ctx,
     (void)deleted;
 
     bbc_circle_disk_ctx_t *ctx = (bbc_circle_disk_ctx_t *)user_ctx;
-    if (!ctx || !ctx->isOpen || ctx->read_only) return -1;
-    if (track  >= BBC_TRACKS)                   return -1;
-    if (sector >= BBC_SECTORS_PER_TRACK)        return -1;
-    if (!ctx->is_dsd && side != 0)              return -1;
-    if (len != BBC_SECTOR_SIZE)                 return -1;
+    if (!ctx || !ctx->isOpen || ctx->read_only)
+        return -1;
+    if (track >= BBC_TRACKS)
+        return -1;
+    if (sector >= BBC_SECTORS_PER_TRACK)
+        return -1;
+    if (!ctx->is_dsd && side != 0)
+        return -1;
+    if (len != BBC_SECTOR_SIZE)
+        return -1;
 
     FSIZE_t offset;
-    if (ctx->is_dsd) {
+    if (ctx->is_dsd)
+    {
         offset = ((track * 2 + side) * BBC_SECTORS_PER_TRACK + sector) * BBC_SECTOR_SIZE;
-    } else {
+    }
+    else
+    {
         offset = (track * BBC_SECTORS_PER_TRACK + sector) * BBC_SECTOR_SIZE;
     }
 
-    if (f_lseek(&ctx->file, offset) != FR_OK) return -1;
+    if (f_lseek(&ctx->file, offset) != FR_OK)
+        return -1;
 
     UINT bytesWritten = 0;
-    if (f_write(&ctx->file, buf, BBC_SECTOR_SIZE, &bytesWritten) != FR_OK || bytesWritten != BBC_SECTOR_SIZE) {
+    if (f_write(&ctx->file, buf, BBC_SECTOR_SIZE, &bytesWritten) != FR_OK || bytesWritten != BBC_SECTOR_SIZE)
+    {
         return -1;
     }
 
@@ -178,159 +197,200 @@ bool CBeebRunner::MountSDDiskImage(void)
     return false;
 }
 
-// ------------------------------------------------------------
+/* ------------------------------------------------------------
 // USB HID naar BBC Keyboard Matrix
 // ------------------------------------------------------------
+col 0: 1        2     3    4    5    6    7
+Row 0: SHIFT    CTRL  Q    1    CAPS 0    TAB ESC
+Row 1: 3        W     2    A    S    Z    (no key)
+Row 2: 4        E     R    D    F    X    C
+Row 3: 5        T     6    G    H    V    B
+Row 4: F4       7     8    Y    J    N    SPACE
+Row 5: F5       I     O    U    K    M    ,
+Row 6: F6       9     0    P    L    ;    .
+Row 7: F7       -     =    @    :    /    (no key)
+Row 8: F1       F2    F3   COPY UP   LEFT DELETE
+Row 9: F8       F9    F0   RETURN RIGHT DOWN (no key)
+
+*/
+
 BbcKeyPos CBeebRunner::ConvertHIDToBBCKey(uint8_t hid)
 {
     switch (hid)
     {
-    // Row 0
+    // -------------------------
+    // Row 0 (BBC row 0 → HID col,row swapped)
+    // -------------------------
     case 0x14:
-        return {0, 1}; // Q
-    case 0x43:
-        return {0, 2}; // F10 (F0)
+        return {2, 0}; // Q
     case 0x1E:
-        return {0, 3}; // 1
+        return {3, 0}; // 1
     case 0x39:
-        return {0, 4}; // Caps Lock
+        return {4, 0}; // Caps Lock
+   // case 0x27:
+   //     return {5, 0}; // 0
     case 0x2B:
-        return {0, 6}; // Tab
+        return {6, 0}; // Tab
     case 0x29:
-        return {0, 7}; // Escape
+        return {7, 0}; // Escape
 
+    // -------------------------
     // Row 1
+    // -------------------------
     case 0x20:
         return {1, 1}; // 3
     case 0x1A:
-        return {1, 2}; // W
+        return {2, 1}; // W
     case 0x1F:
-        return {1, 3}; // 2
+        return {3, 1}; // 2
     case 0x04:
-        return {1, 4}; // A
+        return {4, 1}; // A
     case 0x16:
-        return {1, 5}; // S
+        return {5, 1}; // S
     case 0x1D:
-        return {1, 6}; // Z
+        return {6, 1}; // Z
 
+    // -------------------------
     // Row 2
+    // -------------------------
     case 0x21:
-        return {2, 1}; // 4
+        return {1, 2}; // 4
     case 0x08:
         return {2, 2}; // E
     case 0x15:
-        return {2, 3}; // R
+        return {3, 2}; // R
     case 0x07:
-        return {2, 4}; // D
+        return {4, 2}; // D
     case 0x09:
-        return {2, 5}; // F
+        return {5, 2}; // F
     case 0x1B:
-        return {2, 6}; // X
+        return {6, 2}; // X
     case 0x06:
-        return {2, 7}; // C
+        return {7, 2}; // C
 
+    // -------------------------
     // Row 3
+    // -------------------------
     case 0x22:
-        return {3, 1}; // 5
+        return {1, 3}; // 5
     case 0x17:
-        return {3, 2}; // T
+        return {2, 3}; // T
     case 0x23:
         return {3, 3}; // 6
     case 0x0A:
-        return {3, 4}; // G
+        return {4, 3}; // G
     case 0x0B:
-        return {3, 5}; // H
+        return {5, 3}; // H
     case 0x19:
-        return {3, 6}; // V
+        return {6, 3}; // V
     case 0x05:
-        return {3, 7}; // B
+        return {7, 3}; // B
 
+    // -------------------------
     // Row 4
+    // -------------------------
     case 0x3D:
-        return {4, 1}; // F4
+        return {0, 4}; // F4
     case 0x24:
-        return {4, 2}; // 7
+        return {1, 4}; // 7
     case 0x25:
-        return {4, 3}; // 8
+        return {2, 4}; // 8
     case 0x1C:
-        return {4, 4}; // Y
+        return {3, 4}; // Y
     case 0x0D:
-        return {4, 5}; // J
+        return {4, 4}; // J
     case 0x11:
-        return {4, 6}; // N
+        return {5, 4}; // N
     case 0x2C:
-        return {4, 7}; // Space
+        return {6, 4}; // Space
 
-    // Row 5
-    case 0x3E:
-        return {5, 1}; // F5
-    case 0x0C:
-        return {5, 2}; // I
-    case 0x12:
-        return {5, 3}; // O
-    case 0x18:
-        return {5, 4}; // U
-    case 0x0E:
-        return {5, 5}; // K
-    case 0x10:
-        return {5, 6}; // M
-    case 0x36:
-        return {5, 7}; // Comma
-
-    // Row 6
-    case 0x3F:
-        return {6, 1}; // F6
-    case 0x26:
-        return {6, 2}; // 9
-    case 0x27:
-        return {6, 3}; // 0
-    case 0x13:
-        return {6, 4}; // P
-    case 0x0F:
-        return {6, 5}; // L
-    case 0x37:
-        return {6, 7}; // Period
-
-    // Row 7
-    case 0x40:
-        return {7, 1}; // F7
-    case 0x2D:
-        return {7, 2}; // Minus
-    case 0x2E:
-        return {7, 3}; // Equals
-    case 0x34:
-        return {7, 4}; // Quote / AT
-    case 0x33:
-        return {7, 5}; // Semicolon
-    case 0x38:
-        return {7, 6}; // Slash
-
-    // Row 8
-    case 0x3A:
-        return {8, 0}; // F1
-    case 0x3B:
-        return {8, 1}; // F2
-    case 0x3C:
-        return {8, 2}; // F3
-    case 0x45:
-        return {8, 3}; // F12 -> Break
-    case 0x52:
-    case 0x60:
-        return {8, 5}; // Up Arrow
-    case 0x2A:
-    case 0x4C:
-        return {8, 7}; // Backspace / Delete
-
-    // Row 9
-    case 0x4D:
-    case 0x65:
-        return {9, 3}; // End -> COPY
-    case 0x4F:
-    case 0x5E:
-        return {9, 5}; // Right Arrow
+    // ENTER (jouw speciale mapping)
     case 0x28:
     case 0x58:
-        return {9, 6}; // Return / KP Enter
+        return {9, 4};
+
+    // -------------------------
+    // Row 5
+    // -------------------------
+    case 0x3E:
+        return {0, 5}; // F5
+    case 0x0C:
+        return {1, 5}; // I
+    case 0x12:
+        return {2, 5}; // O
+    case 0x18:
+        return {3, 5}; // U
+    case 0x0E:
+        return {4, 5}; // K
+    case 0x10:
+        return {5, 5}; // M
+    case 0x36:
+        return {6, 5}; // ,
+
+    // -------------------------
+    // Row 6
+    // -------------------------
+    case 0x3F:
+        return {0, 6}; // F6
+    case 0x26:
+        return {1, 6}; // 9
+    case 0x27:
+        return {2, 6}; // 0
+    case 0x13:
+        return {3, 6}; // P
+    case 0x0F:
+        return {4, 6}; // L
+    case 0x33:
+        return {5, 6}; // ;
+    case 0x37:
+        return {6, 6}; // .
+
+    // -------------------------
+    // Row 7
+    // -------------------------
+    case 0x40:
+        return {0, 7}; // F7
+    case 0x2D:
+        return {1, 7}; // -
+    case 0x2E:
+        return {2, 7}; // =
+    case 0x34:
+        return {4, 7}; // ' (Shift → ")
+    case 0x38:
+        return {5, 7}; // /
+
+    // -------------------------
+    // Row 8
+    // -------------------------
+    case 0x3A:
+        return {0, 8}; // F1
+    case 0x3B:
+        return {1, 8}; // F2
+    case 0x3C:
+        return {2, 8}; // F3
+    case 0x2F:
+        return {3, 8}; // COPY ([)
+    case 0x52:
+    case 0x60:
+        return {4, 8}; // UP
+    case 0x4C:
+    case 0x2A:
+        return {7, 8}; // DELETE / Backspace
+
+    // -------------------------
+    // Row 9
+    // -------------------------
+    case 0x4D:
+        return {0, 9}; // F8
+    case 0x43:
+        return {1, 9}; // F9
+    case 0x45:
+        return {2, 9}; // F0 (Break)
+    case 0x4F:
+    case 0x5E:
+        return {4, 9}; // RIGHT
+    case 0x65:
+        return {5, 9}; // DOWN
 
     default:
         return {0xFF, 0xFF};
@@ -424,6 +484,42 @@ void CBeebRunner::RenderBBCFrame(void)
 // ------------------------------------------------------------
 void CBeebRunner::Run(unsigned nCore)
 {
+    /* Core 1: Dedicated BBC 6502 Emulator Loop (2 MHz clock pacing)
+    if (nCore == 1)
+    {
+        while (!m_bCoreInitDone)
+        {
+            asm volatile("dmb sy" ::: "memory");
+        }
+
+        CLogger::Get()->Write(FromBeeb, LogNotice, "Core 1: BBC 6502 CPU Task gestart (2 MHz)");
+
+        u64 nNextFrameTime = m_pTimer->GetClockTicks64();
+
+        while (!m_bShutdown)
+        {
+            u64 nCurrentTime = m_pTimer->GetClockTicks64();
+            if (nCurrentTime > nNextFrameTime + MAX_CATCHUP_US)
+            {
+                nNextFrameTime = nCurrentTime;
+            }
+
+            // 2 MHz = 40.000 cycles per 50 Hz (20 ms) frame
+            int cyclesBudget = 40000;
+            while (cyclesBudget > 0)
+            {
+                cyclesBudget -= bbc_machine_step(&m_Machine);
+            }
+
+            nNextFrameTime += FRAME_TIME_US;
+            while (m_pTimer->GetClockTicks64() < nNextFrameTime)
+            {
+                asm volatile("yield");
+            }
+        }
+        return;
+    }
+*/
     // Core 1: Dedicated BBC 6502 Emulator Loop (2 MHz clock pacing)
     if (nCore == 1)
     {
@@ -459,7 +555,6 @@ void CBeebRunner::Run(unsigned nCore)
         }
         return;
     }
-
     // Core 0: Master (USB HID, Video VSYNC rendering en I/O)
     if (nCore == 0)
     {
@@ -507,66 +602,34 @@ void CBeebRunner::Run(unsigned nCore)
         }
     }
 }
-
-// ------------------------------------------------------------
-// Keyboard Handlers
-// ------------------------------------------------------------
 void CBeebRunner::KeyStatusHandlerRaw(unsigned char ucModifiers, const unsigned char RawKeys[6])
 {
     if (!s_pThis)
         return;
 
-    static uint8_t s_lastHID[6] = {0};
-    static BbcKeyPos s_lastPos[6] = {{0xFF, 0xFF}, {0xFF, 0xFF}, {0xFF, 0xFF}, {0xFF, 0xFF}, {0xFF, 0xFF}, {0xFF, 0xFF}};
+    static uint8_t s_activeHID[6] = {0};
+    static BbcKeyPos s_activePos[6] = {
+        {0xFF, 0xFF}, {0xFF, 0xFF}, {0xFF, 0xFF}, {0xFF, 0xFF}, {0xFF, 0xFF}, {0xFF, 0xFF}};
 
     bbc_machine_t *m = &s_pThis->m_Machine;
 
-    // Directe modifiers (Shift & Ctrl)
+    // 1. Modifiers (Row 0, Col 0 voor Shift en Row 0, Col 1 voor Ctrl)
     bool bShift = (ucModifiers & 0x22) != 0;
     bool bCtrl = (ucModifiers & 0x11) != 0;
     bbc_machine_key_event(m, 0, 0, bShift); // Shift = Row 0, Col 0
-    bbc_machine_key_event(m, 1, 0, bCtrl);  // Ctrl  = Row 1, Col 0
+    bbc_machine_key_event(m, 0, 1, bCtrl);  // Ctrl  = Row 0, Col 1
 
-    // KeyDown detectie
+    // 2. KEY-UP detectie: toetsen die niet langer ingedrukt zijn
     for (int i = 0; i < 6; i++)
     {
-        uint8_t hid = RawKeys[i] & 0xFF;
-        if (!hid)
-            continue;
-
-        bool alreadyPressed = false;
-        for (int j = 0; j < 6; j++)
-        {
-            if (s_lastHID[j] == hid)
-            {
-                alreadyPressed = true;
-                break;
-            }
-        }
-
-        if (!alreadyPressed)
-        {
-            BbcKeyPos pos = ConvertHIDToBBCKey(hid);
-            if (pos.row != 0xFF)
-            {
-                bbc_machine_key_event(m, pos.row, pos.col, true);
-                s_lastPos[i] = pos;
-                s_lastHID[i] = hid;
-            }
-        }
-    }
-
-    // KeyUp detectie
-    for (int i = 0; i < 6; i++)
-    {
-        uint8_t oldHID = s_lastHID[i];
-        if (!oldHID)
+        uint8_t activeHID = s_activeHID[i];
+        if (activeHID == 0)
             continue;
 
         bool stillPressed = false;
-        for (int j = 0; j < 6; j++)
+        for (int k = 0; k < 6; k++)
         {
-            if (RawKeys[j] == oldHID)
+            if ((RawKeys[k] & 0xFF) == activeHID)
             {
                 stillPressed = true;
                 break;
@@ -575,15 +638,93 @@ void CBeebRunner::KeyStatusHandlerRaw(unsigned char ucModifiers, const unsigned 
 
         if (!stillPressed)
         {
-            BbcKeyPos pos = s_lastPos[i];
-            if (pos.row != 0xFF)
+            BbcKeyPos pos = s_activePos[i];
+            if (pos.row != 0xFF && pos.col != 0xFF)
             {
                 bbc_machine_key_event(m, pos.row, pos.col, false);
+                CLogger::Get()->Write(FromBeeb, LogNotice, "Key UP: Row=%d Col=%d (HID 0x%02X)", pos.row, pos.col, activeHID);
             }
-            s_lastPos[i] = {0xFF, 0xFF};
-            s_lastHID[i] = 0;
+            s_activeHID[i] = 0;
+            s_activePos[i] = {0xFF, 0xFF};
         }
     }
+
+    // 3. KEY-DOWN detectie: toetsen die nieuw zijn ingedrukt
+    for (int k = 0; k < 6; k++)
+    {
+        uint8_t hid = RawKeys[k] & 0xFF;
+        if (hid == 0)
+            continue;
+
+        // F12 onderscheppen als hardware Reset / Break
+        if (hid == 0x45)
+        {
+            bool alreadyDown = false;
+            for (int i = 0; i < 6; i++)
+            {
+                if (s_activeHID[i] == 0x45)
+                {
+                    alreadyDown = true;
+                    break;
+                }
+            }
+            if (!alreadyDown)
+            {
+                CLogger::Get()->Write(FromBeeb, LogNotice, "F12 ingedrukt: Hardware BREAK");
+                bbc_machine_break(m, bShift);
+                // Registreer in activeHID zodat hij niet continu triggert zolang hij ingedrukt blijft
+                for (int i = 0; i < 6; i++)
+                {
+                    if (s_activeHID[i] == 0)
+                    {
+                        s_activeHID[i] = 0x45;
+                        s_activePos[i] = {0xFF, 0xFF};
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+
+        bool alreadyTracked = false;
+        for (int i = 0; i < 6; i++)
+        {
+            if (s_activeHID[i] == hid)
+            {
+                alreadyTracked = true;
+                break;
+            }
+        }
+
+        if (!alreadyTracked)
+        {
+            BbcKeyPos pos = ConvertHIDToBBCKey(hid);
+            if (pos.row != 0xFF && pos.col != 0xFF)
+            {
+                int freeSlot = -1;
+                for (int i = 0; i < 6; i++)
+                {
+                    if (s_activeHID[i] == 0)
+                    {
+                        freeSlot = i;
+                        break;
+                    }
+                }
+
+                if (freeSlot >= 0)
+                {
+                    s_activeHID[freeSlot] = hid;
+                    s_activePos[freeSlot] = pos;
+                }
+
+                bbc_machine_key_event(m, pos.row, pos.col, true);
+                CLogger::Get()->Write(FromBeeb, LogNotice, "Key DOWN: Row=%d Col=%d (HID 0x%02X)", pos.row, pos.col, hid);
+            }
+        }
+    }
+
+    // 4. Data cache flush/barrier voor Core 1
+    asm volatile("dmb sy" ::: "memory");
 }
 
 void CBeebRunner::KeyboardRemovedHandler(CDevice *pDevice, void *pContext)
