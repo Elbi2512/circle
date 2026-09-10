@@ -12,6 +12,10 @@
 #define BBC_BUF_W 640 /* pixels per VGA line / BBC row */
 
 static const char FromBeeb[] = "beeb";
+extern "C" void bbc_debug_log(const char *msg, unsigned val1, unsigned val2)
+{
+    CLogger::Get()->Write(FromBeeb, LogNotice, "%s %u, %u", msg, val1, val2);
+}
 
 CBeebRunner *CBeebRunner::s_pThis = nullptr;
 
@@ -197,204 +201,112 @@ bool CBeebRunner::MountSDDiskImage(void)
     return false;
 }
 
-/* ------------------------------------------------------------
-// USB HID naar BBC Keyboard Matrix
-// ------------------------------------------------------------
-col 0: 1        2     3    4    5    6    7
-Row 0: SHIFT    CTRL  Q    1    CAPS 0    TAB ESC
-Row 1: 3        W     2    A    S    Z    (no key)
-Row 2: 4        E     R    D    F    X    C
-Row 3: 5        T     6    G    H    V    B
-Row 4: F4       7     8    Y    J    N    SPACE
-Row 5: F5       I     O    U    K    M    ,
-Row 6: F6       9     0    P    L    ;    .
-Row 7: F7       -     =    @    :    /    (no key)
-Row 8: F1       F2    F3   COPY UP   LEFT DELETE
-Row 9: F8       F9    F0   RETURN RIGHT DOWN (no key)
-
-*/
+/* -----------------------------------------------------------------------
+ * BBC Micro Model B keyboard matrix mapping
+ *
+ * The BBC keyboard is a 10-row × 8-column matrix.
+ *
+ *  row\col  0       1       2       3       4       5       6       7
+ *  0        SHIFT   Q       F0      1       CAPS    SHIFTLK TAB     ESCAPE
+ *  1        CTRL    3       W       2       A       S       Z       (none)
+ *  2        (none)  4       E       R       D       F       X       C
+ *  3        (none)  5       T       6       G       H       V       B
+ *  4        (none)  F4      7       8       Y       J       N       SPACE
+ *  5        (none)  F5      I       O       U       K       M       COMMA
+ *  6        (none)  F6      9       0       P       L       (none)  PERIOD
+ *  7        (none)  F7      MINUS   EQUALS  AT      COLON   SLASH   (none)
+ *  8        F1      F2      F3      BREAK   (none)  UP      (none)  DELETE
+ *  9        (none)  (none)  (none)  COPY    (none)  RIGHT   RETURN  (none)
+ * ----------------------------------------------------------------------- */
 
 BbcKeyPos CBeebRunner::ConvertHIDToBBCKey(uint8_t hid)
 {
-    switch (hid)
-    {
-    // -------------------------
-    // Row 0 (BBC row 0 → HID col,row swapped)
-    // -------------------------
-    case 0x14:
-        return {2, 0}; // Q
-    case 0x1E:
-        return {3, 0}; // 1
-    case 0x39:
-        return {4, 0}; // Caps Lock
-   // case 0x27:
-   //     return {5, 0}; // 0
-    case 0x2B:
-        return {6, 0}; // Tab
-    case 0x29:
-        return {7, 0}; // Escape
+ //   CLogger::Get()->Write(FromBeeb, LogNotice, "ConvertHID: HID 0x%02X (%u)", hid, hid);
 
-    // -------------------------
-    // Row 1
-    // -------------------------
-    case 0x20:
-        return {1, 1}; // 3
-    case 0x1A:
-        return {2, 1}; // W
-    case 0x1F:
-        return {3, 1}; // 2
-    case 0x04:
-        return {4, 1}; // A
-    case 0x16:
-        return {5, 1}; // S
-    case 0x1D:
-        return {6, 1}; // Z
+    BbcKeyPos pos = {0xFF, 0xFF};
+switch (hid)
+{
+    /* --- Col 1 --- */
+    case VK_Q:         pos.row = 0; pos.col = 1; break;
+    case VK_3:         pos.row = 1; pos.col = 1; break;
+    case VK_4:         pos.row = 2; pos.col = 1; break;
+    case VK_5:         pos.row = 3; pos.col = 1; break;
+    case VK_8:         pos.row = 5; pos.col = 1; break;
+    case VK_MINUS:     pos.row = 7; pos.col = 1; break;
+    case VK_LEFT:      pos.row = 9; pos.col = 1; break;
+ 
 
-    // -------------------------
-    // Row 2
-    // -------------------------
-    case 0x21:
-        return {1, 2}; // 4
-    case 0x08:
-        return {2, 2}; // E
-    case 0x15:
-        return {3, 2}; // R
-    case 0x07:
-        return {4, 2}; // D
-    case 0x09:
-        return {5, 2}; // F
-    case 0x1B:
-        return {6, 2}; // X
-    case 0x06:
-        return {7, 2}; // C
+    /* --- Col 2 --- */
+    case VK_W:         pos.row = 1; pos.col = 2; break;
+    case VK_E:         pos.row = 2; pos.col = 2; break;
+    case VK_T:         pos.row = 3; pos.col = 2; break;
+    case VK_7:         pos.row = 4; pos.col = 2; break;
+    case VK_I:         pos.row = 5; pos.col = 2; break;
+    case VK_9:         pos.row = 6; pos.col = 2; break;
+    case VK_0:         pos.row = 7; pos.col = 2; break;
+    case VK_DOWN:      pos.row = 9; pos.col = 2; break;
 
-    // -------------------------
-    // Row 3
-    // -------------------------
-    case 0x22:
-        return {1, 3}; // 5
-    case 0x17:
-        return {2, 3}; // T
-    case 0x23:
-        return {3, 3}; // 6
-    case 0x0A:
-        return {4, 3}; // G
-    case 0x0B:
-        return {5, 3}; // H
-    case 0x19:
-        return {6, 3}; // V
-    case 0x05:
-        return {7, 3}; // B
+    /* --- Col 3 --- */
+    case VK_1:         pos.row = 0; pos.col = 3; break;
+    case VK_2:         pos.row = 1; pos.col = 3; break;
+    case VK_D:         pos.row = 2; pos.col = 3; break;
+    case VK_R:         pos.row = 3; pos.col = 3; break;
+    case VK_6:         pos.row = 4; pos.col = 3; break;
+    case VK_U:         pos.row = 5; pos.col = 3; break; // jouw comment liet 2 varianten zien
+    case VK_O:         pos.row = 6; pos.col = 3; break;
+    case VK_P:         pos.row = 7; pos.col = 3; break;
+    case VK_LBRACKET:  pos.row = 8; pos.col = 3; break;
+    case VK_UP:        pos.row = 9; pos.col = 3; break;
 
-    // -------------------------
-    // Row 4
-    // -------------------------
-    case 0x3D:
-        return {0, 4}; // F4
-    case 0x24:
-        return {1, 4}; // 7
-    case 0x25:
-        return {2, 4}; // 8
-    case 0x1C:
-        return {3, 4}; // Y
-    case 0x0D:
-        return {4, 4}; // J
-    case 0x11:
-        return {5, 4}; // N
-    case 0x2C:
-        return {6, 4}; // Space
+    /* --- Col 4 --- */
+    case VK_CAPSLOCK:  pos.row = 0; pos.col = 4; break;
+    case VK_A:         pos.row = 1; pos.col = 4; break;
+    case VK_X:         pos.row = 2; pos.col = 4; break;
+    case VK_F:         pos.row = 3; pos.col = 4; break;
+    case VK_Y:         pos.row = 4; pos.col = 4; break;
+    case VK_J:         pos.row = 5; pos.col = 4; break;
+    case VK_K:         pos.row = 6; pos.col = 4; break;
+    case VK_AT:        pos.row = 7; pos.col = 4; break;
+    case VK_COLON:     pos.row = 8; pos.col = 4; break;
+    case VK_RETURN:    pos.row = 9; pos.col = 4; break;
 
-    // ENTER (jouw speciale mapping)
-    case 0x28:
-    case 0x58:
-        return {9, 4};
+    /* --- Col 5 --- */
+    case VK_S:         pos.row = 1; pos.col = 5; break;
+    case VK_C:         pos.row = 2; pos.col = 5; break;
+    case VK_G:         pos.row = 3; pos.col = 5; break;
+    case VK_H:         pos.row = 4; pos.col = 5; break;
+    case VK_N:         pos.row = 5; pos.col = 5; break;
+    case VK_L:         pos.row = 6; pos.col = 5; break;
+    case VK_SEMICOLON: pos.row = 7; pos.col = 5; break;
+    case VK_RBRACKET:  pos.row = 8; pos.col = 5; break;
+    case VK_DELETE:    pos.row = 9; pos.col = 5; break;
 
-    // -------------------------
-    // Row 5
-    // -------------------------
-    case 0x3E:
-        return {0, 5}; // F5
-    case 0x0C:
-        return {1, 5}; // I
-    case 0x12:
-        return {2, 5}; // O
-    case 0x18:
-        return {3, 5}; // U
-    case 0x0E:
-        return {4, 5}; // K
-    case 0x10:
-        return {5, 5}; // M
-    case 0x36:
-        return {6, 5}; // ,
-
-    // -------------------------
-    // Row 6
-    // -------------------------
-    case 0x3F:
-        return {0, 6}; // F6
-    case 0x26:
-        return {1, 6}; // 9
-    case 0x27:
-        return {2, 6}; // 0
-    case 0x13:
-        return {3, 6}; // P
-    case 0x0F:
-        return {4, 6}; // L
-    case 0x33:
-        return {5, 6}; // ;
-    case 0x37:
-        return {6, 6}; // .
-
-    // -------------------------
-    // Row 7
-    // -------------------------
-    case 0x40:
-        return {0, 7}; // F7
-    case 0x2D:
-        return {1, 7}; // -
-    case 0x2E:
-        return {2, 7}; // =
-    case 0x34:
-        return {4, 7}; // ' (Shift → ")
-    case 0x38:
-        return {5, 7}; // /
-
-    // -------------------------
-    // Row 8
-    // -------------------------
-    case 0x3A:
-        return {0, 8}; // F1
-    case 0x3B:
-        return {1, 8}; // F2
-    case 0x3C:
-        return {2, 8}; // F3
-    case 0x2F:
-        return {3, 8}; // COPY ([)
-    case 0x52:
-    case 0x60:
-        return {4, 8}; // UP
-    case 0x4C:
-    case 0x2A:
-        return {7, 8}; // DELETE / Backspace
-
-    // -------------------------
-    // Row 9
-    // -------------------------
-    case 0x4D:
-        return {0, 9}; // F8
-    case 0x43:
-        return {1, 9}; // F9
-    case 0x45:
-        return {2, 9}; // F0 (Break)
-    case 0x4F:
-    case 0x5E:
-        return {4, 9}; // RIGHT
-    case 0x65:
-        return {5, 9}; // DOWN
+    /* --- Col 6 --- */
+    case VK_TAB:       pos.row = 0; pos.col = 6; break;
+    case VK_Z:         pos.row = 1; pos.col = 6; break;
+    case VK_SPACE:     pos.row = 2; pos.col = 6; break;
+    case VK_V:         pos.row = 3; pos.col = 6; break;
+    case VK_B:         pos.row = 4; pos.col = 6; break;
+    case VK_M:         pos.row = 5; pos.col = 6; break;
+    case VK_COMMA:     pos.row = 6; pos.col = 6; break;
+    case VK_PERIOD:    pos.row = 7; pos.col = 6; break;
+    case VK_SLASH:     pos.row = 8; pos.col = 6; break;
+    case VK_END:       pos.row = 9; pos.col = 6; break;
+  
+    /* --- Col 7 --- */
+    case VK_ESCAPE:    pos.row = 0; pos.col = 7; break;
+    case VK_BACKSLASH: pos.row = 8; pos.col = 7; break;
+    case VK_RIGHT:     pos.row = 9; pos.col = 7; break;
+    //case VK_COMMA:     pos.row = 5; pos.col = 7; break;
+    //case VK_PERIOD:    pos.row = 6; pos.col = 7; break;
 
     default:
-        return {0xFF, 0xFF};
-    }
+        pos.row = 0xFF;
+        pos.col = 0xFF;
+        break;
+}
+
+    return pos;
 }
 
 // ------------------------------------------------------------
@@ -602,6 +514,7 @@ void CBeebRunner::Run(unsigned nCore)
         }
     }
 }
+
 void CBeebRunner::KeyStatusHandlerRaw(unsigned char ucModifiers, const unsigned char RawKeys[6])
 {
     if (!s_pThis)
@@ -613,13 +526,15 @@ void CBeebRunner::KeyStatusHandlerRaw(unsigned char ucModifiers, const unsigned 
 
     bbc_machine_t *m = &s_pThis->m_Machine;
 
-    // 1. Modifiers (Row 0, Col 0 voor Shift en Row 0, Col 1 voor Ctrl)
+    // 1. Modifiers (Shift en Ctrl)
+    // In bbc_machine.c verwacht bbc_machine_key_event(m, row, col, pressed)
+    // Row 0, Col 0 = Shift | Row 0, Col 1 = Ctrl
     bool bShift = (ucModifiers & 0x22) != 0;
-    bool bCtrl = (ucModifiers & 0x11) != 0;
-    bbc_machine_key_event(m, 0, 0, bShift); // Shift = Row 0, Col 0
-    bbc_machine_key_event(m, 0, 1, bCtrl);  // Ctrl  = Row 0, Col 1
+    bool bCtrl  = (ucModifiers & 0x11) != 0;
+    bbc_machine_key_event(m, 0, 0, bShift);
+    bbc_machine_key_event(m, 0, 1, bCtrl);
 
-    // 2. KEY-UP detectie: toetsen die niet langer ingedrukt zijn
+    // 2. KEY-UP detectie: toetsen die niet langer in het HID-rapport staan
     for (int i = 0; i < 6; i++)
     {
         uint8_t activeHID = s_activeHID[i];
@@ -641,7 +556,8 @@ void CBeebRunner::KeyStatusHandlerRaw(unsigned char ucModifiers, const unsigned 
             BbcKeyPos pos = s_activePos[i];
             if (pos.row != 0xFF && pos.col != 0xFF)
             {
-                bbc_machine_key_event(m, pos.row, pos.col, false);
+                // Let op: pos.col wordt row (0..7) en pos.row wordt col (0..9) voor de emulator
+                bbc_machine_key_event(m, pos.col, pos.row, false);
                 CLogger::Get()->Write(FromBeeb, LogNotice, "Key UP: Row=%d Col=%d (HID 0x%02X)", pos.row, pos.col, activeHID);
             }
             s_activeHID[i] = 0;
@@ -649,15 +565,15 @@ void CBeebRunner::KeyStatusHandlerRaw(unsigned char ucModifiers, const unsigned 
         }
     }
 
-    // 3. KEY-DOWN detectie: toetsen die nieuw zijn ingedrukt
+    // 3. KEY-DOWN detectie: nieuwe toetsen in RawKeys
     for (int k = 0; k < 6; k++)
     {
         uint8_t hid = RawKeys[k] & 0xFF;
         if (hid == 0)
             continue;
 
-        // F12 onderscheppen als hardware Reset / Break
-        if (hid == 0x45)
+        // F12 / Break afhandeling
+        if (hid == 0x45) // VK_F12
         {
             bool alreadyDown = false;
             for (int i = 0; i < 6; i++)
@@ -672,7 +588,6 @@ void CBeebRunner::KeyStatusHandlerRaw(unsigned char ucModifiers, const unsigned 
             {
                 CLogger::Get()->Write(FromBeeb, LogNotice, "F12 ingedrukt: Hardware BREAK");
                 bbc_machine_break(m, bShift);
-                // Registreer in activeHID zodat hij niet continu triggert zolang hij ingedrukt blijft
                 for (int i = 0; i < 6; i++)
                 {
                     if (s_activeHID[i] == 0)
@@ -715,15 +630,17 @@ void CBeebRunner::KeyStatusHandlerRaw(unsigned char ucModifiers, const unsigned 
                 {
                     s_activeHID[freeSlot] = hid;
                     s_activePos[freeSlot] = pos;
+                   // CLogger::Get()->Write(FromBeeb, LogNotice, "Freeslot: %u | HID 0x%02X -> Row=%d Col=%d", freeSlot, hid, pos.row, pos.col);
                 }
 
-                bbc_machine_key_event(m, pos.row, pos.col, true);
-                CLogger::Get()->Write(FromBeeb, LogNotice, "Key DOWN: Row=%d Col=%d (HID 0x%02X)", pos.row, pos.col, hid);
+                // Let op: pos.col wordt row (0..7) en pos.row wordt col (0..9) voor de emulator
+                bbc_machine_key_event(m, pos.col, pos.row, true);
+                // CLogger::Get()->Write(FromBeeb, LogNotice, "Key DOWN: HID 0x%02X -> Row=%d Col=%d", hid, pos.row, pos.col);
             }
         }
     }
 
-    // 4. Data cache flush/barrier voor Core 1
+    // 4. Data cache flush voor Core 1
     asm volatile("dmb sy" ::: "memory");
 }
 

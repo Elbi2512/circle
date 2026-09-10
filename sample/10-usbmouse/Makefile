@@ -1,15 +1,16 @@
-#
-# Makefile
-#
+CIRCLEHOME = /home/lbijn/circle
 
-CIRCLEHOME = ../..
+# Compiler optimalisaties toevoegen
+DEFINE += -O3 -ffast-math -fno-math-errno
 
-OBJS	= main.o kernel.o
+INCLUDE += -I $(CIRCLEHOME)/addon -I $(CIRCLEHOME)/addon/fatfs
 
-LIBS	= $(CIRCLEHOME)/lib/usb/libusb.a \
-	  $(CIRCLEHOME)/lib/input/libinput.a \
-	  $(CIRCLEHOME)/lib/fs/libfs.a \
-	  $(CIRCLEHOME)/lib/libcircle.a
+OBJS = kernel.o mandelbrot.o
+
+LIBS = $(CIRCLEHOME)/lib/usb/libusb.a \
+       $(CIRCLEHOME)/lib/input/libinput.a \
+       $(CIRCLEHOME)/lib/fs/libfs.a \
+       $(CIRCLEHOME)/lib/libcircle.a
 
 include ../Rules.mk
 

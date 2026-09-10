@@ -1,5 +1,5 @@
 /*
- * bbc_uservia.h — BBC Micro User VIA (IC69, &FE60-&FE6F) for ESP32/ESP-IDF
+ * bbc_uservia.h — BBC Micro User VIA (IC69, &FE60-&FE6F) for Circle Bare-metal
  *
  * Thin wrapper over the generic m6522_t. The User VIA provides:
  *   - Port A: Printer data output (Centronics)
@@ -9,6 +9,7 @@
  * Typical uses: Centronics printer, AMX mouse, user-port peripherals.
  *
  * Licence: zlib (adaptation of floooh/chips)
+ * Copyright (c) 2026 esp-beep project / Circle port
  */
 
 #pragma once

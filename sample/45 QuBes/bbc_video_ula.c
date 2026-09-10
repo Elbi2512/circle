@@ -1,5 +1,5 @@
 /*
- * bbc_video_ula.c — Acorn Video ULA emulation for BBC Micro / ESP32-ESP-IDF
+ * bbc_video_ula.c — Acorn Video ULA emulation for BBC Micro / Circle Bare-metal
  *
  * References: beebwiki.mdfs.net/Video_ULA, B-em video.c (GPL-2, reference only),
  *             BeebFpga vidproc.vhd (reference only).
@@ -11,21 +11,13 @@
  *     a naive MSB-first layout.
  *
  * Licence: zlib
- * Copyright (c) 2026 esp-beep project
+ * Copyright (c) 2026 esp-beep project / Circle port
  */
 
 #include <string.h>
 #include "bbc_video_ula.h"
 
-#ifdef ESP_PLATFORM
-#  include "esp_log.h"
-#  include "esp_attr.h"
-#  define ULA_LOGD(fmt, ...) ESP_LOGD("bbc_ula", fmt, ##__VA_ARGS__)
-#  define RENDER_IRAM IRAM_ATTR
-#else
-#  define ULA_LOGD(fmt, ...) /* no-op */
-#  define RENDER_IRAM
-#endif
+#define ULA_LOGD(fmt, ...) /* no-op */
 
 /* --------------------------------------------------------------------------
  * Default palette — MOS 1.20 default: logical colour N → physical colour N
@@ -111,7 +103,7 @@ void bbc_video_ula_rebuild_tables(bbc_video_ula_t *ula)
     /*
      * 4bpp (MODE 2): 2 pixels per byte.
      * Each pixel uses 4 bits: positions {7,5,3,1} for pixel 0
-     *                         and {6,4,2,0} for pixel 1.
+     *                        and {6,4,2,0} for pixel 1.
      *
      * BBC bit ordering (from B-em table4bpp initialisation):
      *   Pixel 0: {bit7, bit5, bit3, bit1}  (even-offset bits)
@@ -209,10 +201,10 @@ void bbc_video_ula_write(bbc_video_ula_t *ula, uint8_t addr, uint8_t data)
     }
 }
 
-RENDER_IRAM int bbc_video_ula_serialize(const bbc_video_ula_t *ula,
-                             uint8_t data_byte,
-                             uint8_t *out_colours,
-                             bool cursor_active)
+int bbc_video_ula_serialize(const bbc_video_ula_t *ula,
+                            uint8_t data_byte,
+                            uint8_t *out_colours,
+                            bool cursor_active)
 {
     int n;
     switch (ula->bpp_mode) {

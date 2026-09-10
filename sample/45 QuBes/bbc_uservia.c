@@ -1,21 +1,17 @@
 /*
- * bbc_uservia.c — BBC Micro User VIA (IC69) for ESP32/ESP-IDF
+ * bbc_uservia.c — BBC Micro User VIA (IC69) for Circle Bare-metal
  *
  * Thin wrapper over m6522_t. Forwards port_out/port_in/irq to the
  * host via the bbc_uservia_callbacks_t interface.
  *
  * Licence: zlib
+ * Copyright (c) 2026 esp-beep project / Circle port
  */
 
 #include <string.h>
 #include "bbc_uservia.h"
 
-#ifdef ESP_PLATFORM
-#  include "esp_log.h"
-#  define UV_LOGD(fmt, ...) ESP_LOGD("uservia", fmt, ##__VA_ARGS__)
-#else
-#  define UV_LOGD(fmt, ...) /* no-op */
-#endif
+#define UV_LOGD(fmt, ...) /* no-op */
 
 /* -------------------------------------------------------------------------
  * m6522 generic callbacks

@@ -1,5 +1,5 @@
 /*
- * bbc_sysvia.h — BBC Micro System VIA (IC3, &FE40-&FE4F) for ESP32/ESP-IDF
+ * bbc_sysvia.h — BBC Micro System VIA (IC3, &FE40-&FE4F) for Circle Bare-metal
  *
  * Wraps the generic m6522_t and adds:
  *   - Addressable latch IC32 (74LS259) on Port B bits 0-3
@@ -9,6 +9,7 @@
  *   - ADC end-of-conversion → CB1
  *
  * Licence: zlib (adaptation of floooh/chips) / GPL-2.0 (B-em derived logic)
+ * Copyright (c) 2026 esp-beep project / Circle port
  */
 
 #pragma once
@@ -23,14 +24,14 @@ extern "C" {
 /* --------------------------------------------------------------------------
  * Addressable latch IC32 bit positions
  * -------------------------------------------------------------------------- */
-#define BBC_LATCH_SOUND_WE      0  /* Sound chip (SN76489) write enable — active LOW  */
-#define BBC_LATCH_SPEECH_RD     1  /* Speech chip read (not implemented)               */
-#define BBC_LATCH_TAPE_MOTOR    2  /* Cassette motor relay — active HIGH               */
-#define BBC_LATCH_KB_AUTOSCAN   3  /* Keyboard auto-scan enable                        */
-#define BBC_LATCH_SCREEN_B0     4  /* Screen bank select bit 0 (Master 128)            */
-#define BBC_LATCH_SCREEN_B1     5  /* Screen bank select bit 1 (Master 128)            */
-#define BBC_LATCH_CAPS_LED      6  /* Caps Lock LED — active LOW                       */
-#define BBC_LATCH_SHIFT_LED     7  /* Shift Lock LED — active LOW                      */
+#define BBC_LATCH_SOUND_WE      0   /* Sound chip (SN76489) write enable — active LOW  */
+#define BBC_LATCH_SPEECH_RD     1   /* Speech chip read (not implemented)               */
+#define BBC_LATCH_TAPE_MOTOR    2   /* Cassette motor relay — active HIGH               */
+#define BBC_LATCH_KB_AUTOSCAN   3   /* Keyboard auto-scan enable                        */
+#define BBC_LATCH_SCREEN_B0     4   /* Screen bank select bit 0 (Master 128)            */
+#define BBC_LATCH_SCREEN_B1     5   /* Screen bank select bit 1 (Master 128)            */
+#define BBC_LATCH_CAPS_LED      6   /* Caps Lock LED — active LOW                       */
+#define BBC_LATCH_SHIFT_LED     7   /* Shift Lock LED — active LOW                      */
 
 /* --------------------------------------------------------------------------
  * Callbacks
@@ -81,10 +82,10 @@ typedef struct {
  * System VIA state
  * -------------------------------------------------------------------------- */
 typedef struct {
-    m6522_t  via;            /* Generic 6522 VIA                        */
-    uint8_t  latch;          /* Current IC32 state (8 bits)             */
-    bool     joy_fire0;      /* Joystick fire button 0 (PB4, active low)*/
-    bool     joy_fire1;      /* Joystick fire button 1 (PB5, active low)*/
+    m6522_t    via;             /* Generic 6522 VIA                         */
+    uint8_t    latch;           /* Current IC32 state (8 bits)              */
+    bool       joy_fire0;       /* Joystick fire button 0 (PB4, active low)*/
+    bool       joy_fire1;       /* Joystick fire button 1 (PB5, active low)*/
     bbc_sysvia_callbacks_t cb;
 } bbc_sysvia_t;
 

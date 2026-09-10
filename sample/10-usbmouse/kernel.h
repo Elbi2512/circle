@@ -1,88 +1,81 @@
 //
 // kernel.h
 //
-// Circle - A C++ bare metal environment for Raspberry Pi
-// Copyright (C) 2014-2020  R. Stange <rsta2@o2online.de>
-// 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
-//
 #ifndef _kernel_h
 #define _kernel_h
+
+#include <circle/types.h>
+
+#ifndef DEPTH
+#define DEPTH 32
+#endif
 
 #include <circle/actled.h>
 #include <circle/koptions.h>
 #include <circle/devicenameservice.h>
 #include <circle/screen.h>
 #include <circle/serial.h>
-#include <circle/exceptionhandler.h>
+#include <circle/logger.h>
 #include <circle/interrupt.h>
 #include <circle/timer.h>
-#include <circle/logger.h>
 #include <circle/usb/usbhcidevice.h>
 #include <circle/input/mouse.h>
-#include <circle/types.h>
+#include <circle/memory.h>
+#include "mandelbrot.h"
 
 enum TShutdownMode
 {
-	ShutdownNone,
-	ShutdownHalt,
-	ShutdownReboot
+    ShutdownNone,
+    ShutdownHalt,
+    ShutdownReboot
 };
 
 class CKernel
 {
 public:
-	CKernel (void);
-	~CKernel (void);
+    CKernel(void);
+    ~CKernel(void);
 
-	boolean Initialize (void);
-
-	TShutdownMode Run (void);
-
-private:
-	void MouseEventHandler (TMouseEvent Event, unsigned nButtons, unsigned nPosX, unsigned nPosY, int nWheelMove);
-	static void MouseEventStub (TMouseEvent Event, unsigned nButtons, unsigned nPosX, unsigned nPosY, int nWheelMove);
-
-	void DrawLine (int nPosX1, int nPosY1, int nPosX2, int nPosY2, TScreenColor Color);
-
-	static void MouseRemovedHandler (CDevice *pDevice, void *pContext);
+    boolean Initialize(void);
+    TShutdownMode Run(void);
 
 private:
-	// do not change this order
-	CActLED			m_ActLED;
-	CKernelOptions		m_Options;
-	CDeviceNameService	m_DeviceNameService;
-	CScreenDevice		m_Screen;
-	CSerialDevice		m_Serial;
-	CExceptionHandler	m_ExceptionHandler;
-	CInterruptSystem	m_Interrupt;
-	CTimer			m_Timer;
-	CLogger			m_Logger;
-	CUSBHCIDevice		m_USBHCI;
+    void MouseEventHandler(TMouseEvent Event, unsigned nButtons, unsigned nPosX, unsigned nPosY, int nWheelMove);
+    static void MouseEventStub(TMouseEvent Event, unsigned nButtons, unsigned nPosX, unsigned nPosY, int nWheelMove);
+    static void MouseRemovedHandler(CDevice *pDevice, void *pContext);
+    void DrawLine(int nPosX1, int nPosY1, int nPosX2, int nPosY2, TScreenColor Color);
+    void DrawXORRect(int x0, int y0, int x1, int y1);
 
-	CMouseDevice * volatile m_pMouse;
+private:
+    CActLED m_ActLED;
+    CKernelOptions m_Options;
+    CDeviceNameService m_DeviceNameService;
+    CScreenDevice m_Screen;
+    CSerialDevice m_Serial;
+    CInterruptSystem m_Interrupt;
+    CTimer m_Timer;
+    CLogger m_Logger;
+    CUSBHCIDevice m_USBHCI;
+    CMemorySystem m_Memory;
 
-	unsigned m_nPosX;
-	unsigned m_nPosY;
-	int m_nColorIndex;
-	TScreenColor m_Color;
+    CMandelbrotCalculator m_Mandelbrot;
 
-	volatile TShutdownMode m_ShutdownMode;
+    CMouseDevice *m_pMouse;
+    int m_nPendingScrollY;
+    int m_nPendingScrollX;
+    int m_nPosX;
+    int m_nPosY;
+    unsigned m_nAnchorX;
+    unsigned m_nAnchorY;
+    int m_nLastRectX0;
+    int m_nLastRectY0;
+    int m_nLastRectX1;
+    int m_nLastRectY1;
+    boolean m_bSelecting;
 
-	static CKernel *s_pThis;
+    volatile TShutdownMode m_ShutdownMode;
 
-	static TScreenColor s_Colors[];
+    static CKernel *s_pThis;
 };
 
 #endif
