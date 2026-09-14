@@ -301,7 +301,7 @@ void CPia8255::Write(uint16_t addr, uint8_t val)
   {
   case 0: // $B000 - Port A
     m_PortA = val;
- 
+    m_nGfxMode = (val >> 4) & 0x0F;
     break;
 
   case 1: // $B001 - Port B
@@ -310,6 +310,7 @@ void CPia8255::Write(uint16_t addr, uint8_t val)
 
   case 2: // $B002 - Port C
     m_PortC = val;
+    m_nCss = (val & 0x08) ? 2 : 0;
     break;
 
   case 3: // $B003 - Control

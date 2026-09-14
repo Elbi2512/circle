@@ -16,9 +16,8 @@ extern void bbc_debug_log(const char *msg, unsigned val1, unsigned val2);
 #define WD_LOGD(fmt, ...) ESP_LOGD("wd1770", fmt, ##__VA_ARGS__)
 #define WD_LOGW(fmt, ...) ESP_LOGW("wd1770", fmt, ##__VA_ARGS__)
 #else
-#include <stdio.h>
-#define WD_LOGD(fmt, ...) fprintf(stderr, "[wd] " fmt "\n", ##__VA_ARGS__)
-#define WD_LOGW(fmt, ...) fprintf(stderr, "[wd] WARN: " fmt "\n", ##__VA_ARGS__)
+#define WD_LOGD(fmt, ...) ((void)0)
+#define WD_LOGW(fmt, ...) ((void)0)
 #endif
 
 /* Delay constants (in 2 MHz BBC clock cycles, zoals in B-em) */
@@ -187,6 +186,88 @@ static void finish_write_sector(wd1770_t *fdc)
         completed(fdc);
 }
 
+static int load_raw_track(wd1770_t *fdc)
+{
+    fdc->track_pos = 0;
+    fdc->track_size = 0;
+
+    for (uint8_t sector = 0; sector < 10; ++sector)
+    {
+        uint16_t length = 0;
+        if (!fdc->cb.read_sector ||
+            fdc->cb.read_sector(fdc->cb.user_ctx, fdc->cur_drive,
+                                fdc->track, sector, fdc->cur_side,
+                                fdc->density, fdc->track_data + fdc->track_size,
+                                &length) != 0 || length != 256)
+            return -1;
+        fdc->track_size += length;
+    }
+    return 0;
+}
+
+static void begin_read_address(wd1770_t *fdc)
+{
+    fdc->status = WD1770_STATUS_MOTOR_ON | WD1770_STATUS_BUSY;
+    fdc->type1_status = false;
+    fdc->buf_pos = 0;
+    fdc->buf_count = 6;
+    fdc->buf[0] = fdc->track;
+    fdc->buf[1] = fdc->cur_side;
+    fdc->buf[2] = fdc->sector;
+    fdc->buf[3] = 1;
+    fdc->buf[4] = 0;
+    fdc->buf[5] = 0;
+    fdc->data = fdc->buf[fdc->buf_pos++];
+    set_drq(fdc, true);
+}
+
+static void begin_read_track(wd1770_t *fdc)
+{
+    fdc->status = WD1770_STATUS_MOTOR_ON | WD1770_STATUS_BUSY;
+    fdc->type1_status = false;
+    if (load_raw_track(fdc) != 0)
+    {
+        fault(fdc, WD1770_STATUS_RNF, "track not found");
+        return;
+    }
+    fdc->buf_pos = 0;
+    fdc->buf_count = fdc->track_size;
+    fdc->data = fdc->track_data[fdc->buf_pos++];
+    set_drq(fdc, true);
+}
+
+static void begin_write_track(wd1770_t *fdc)
+{
+    if (fdc->write_protect || !fdc->cb.write_sector)
+    {
+        fault(fdc, fdc->write_protect ? WD1770_STATUS_WRITE_PROT : WD1770_STATUS_RNF,
+              "track write unavailable");
+        return;
+    }
+    fdc->status = WD1770_STATUS_MOTOR_ON | WD1770_STATUS_BUSY;
+    fdc->type1_status = false;
+    fdc->track_pos = 0;
+    fdc->track_size = 2560;
+    fdc->data = 0;
+    set_drq(fdc, true);
+}
+
+static void finish_write_track(wd1770_t *fdc)
+{
+    for (uint8_t sector = 0; sector < 10; ++sector)
+    {
+        if (fdc->cb.write_sector(fdc->cb.user_ctx, fdc->cur_drive,
+                                 fdc->track, sector, fdc->cur_side,
+                                 fdc->density, false,
+                                 fdc->track_data + sector * 256, 256) != 0)
+        {
+            fault(fdc, WD1770_STATUS_RNF, "track write failed");
+            return;
+        }
+    }
+    completed(fdc);
+}
+
 /* -------------------------------------------------------------------------
  * Command state machine
  * ------------------------------------------------------------------------- */
@@ -256,10 +337,7 @@ static void cmd_start(wd1770_t *fdc)
         break;
 
     case 0xC: /* Read address */
-        WD_LOGD("read address (stub) side=%d track=%d", fdc->cur_side, fdc->track);
-        fdc->status = WD1770_STATUS_MOTOR_ON | WD1770_STATUS_BUSY;
-        fdc->type1_status = false;
-        fdc->delay_cycles = DELAY_FAULT;
+        begin_read_address(fdc);
         break;
 
     case 0xD: /* Force interrupt */
@@ -267,17 +345,11 @@ static void cmd_start(wd1770_t *fdc)
         break;
 
     case 0xE: /* Read track */
-        WD_LOGD("read track (stub) side=%d track=%d", fdc->cur_side, fdc->track);
-        fdc->status = WD1770_STATUS_MOTOR_ON | WD1770_STATUS_BUSY;
-        fdc->type1_status = false;
-        fdc->delay_cycles = DELAY_FAULT;
+        begin_read_track(fdc);
         break;
 
     case 0xF: /* Write track */
-        WD_LOGD("write track (stub) side=%d track=%d", fdc->cur_side, fdc->track);
-        fdc->status = WD1770_STATUS_MOTOR_ON | WD1770_STATUS_BUSY;
-        fdc->type1_status = false;
-        fdc->delay_cycles = DELAY_FAULT;
+        begin_write_track(fdc);
         break;
     }
     fdc->cmd_started = true;
@@ -377,8 +449,9 @@ static void cmd_next(wd1770_t *fdc)
         }
         break;
 
-    case 0xC: /* Read address (stub) */
-        fault(fdc, WD1770_STATUS_RNF, "read address not supported");
+    case 0xC: /* Read address */
+        if (fdc->buf_pos >= fdc->buf_count)
+            completed(fdc);
         break;
 
     case 0xD: /* Force interrupt */
@@ -391,9 +464,12 @@ static void cmd_next(wd1770_t *fdc)
         WD_LOGD("force interrupt done");
         break;
 
-    case 0xE: /* Read track (stub) */
-    case 0xF: /* Write track (stub) */
-        fault(fdc, WD1770_STATUS_RNF, "track-level op not supported");
+    case 0xE: /* Read track */
+        if (fdc->buf_pos >= fdc->buf_count)
+            completed(fdc);
+        break;
+    case 0xF: /* Write track */
+        finish_write_track(fdc);
         break;
     }
 }
@@ -426,6 +502,9 @@ void wd1770_reset(wd1770_t *fdc)
     fdc->delay_cycles = 0;
     fdc->buf_pos = 0;
     fdc->buf_count = 0;
+    fdc->track_pos = 0;
+    fdc->track_size = 0;
+    fdc->track_sector = 0;
 
     fdc->index_pulse = true;
     fdc->index_cycles = INDEX_PULSE_CYCLES;
@@ -474,7 +553,9 @@ uint8_t wd1770_read(wd1770_t *fdc, uint8_t reg)
 
         if (fdc->buf_pos < fdc->buf_count) {
             /* Volgende byte klaarzetten met floppy timing delay (128 cycli) */
-            fdc->data = fdc->buf[fdc->buf_pos++];
+            fdc->data = (fdc->command >> 4 == 0xE)
+                            ? fdc->track_data[fdc->buf_pos++]
+                            : fdc->buf[fdc->buf_pos++];
             fdc->delay_cycles = 128; 
         } else {
             /* Laatste byte (256): niet direct INTRQ vuren binnen de LDA instructie,
@@ -537,6 +618,15 @@ void wd1770_write(wd1770_t *fdc, uint8_t reg, uint8_t val)
         fdc->data = val;
         fdc->seek_ok = true;
         if ((fdc->status & WD1770_STATUS_BUSY) &&
+            (fdc->command >> 4) == 0xF)
+        {
+            if (fdc->track_pos < sizeof(fdc->track_data))
+                fdc->track_data[fdc->track_pos++] = val;
+            if (fdc->track_pos < fdc->track_size)
+                set_drq(fdc, true);
+            return;
+        }
+        if ((fdc->status & WD1770_STATUS_BUSY) &&
             ((fdc->command & 0xE0) == 0xA0))
         {
             if (fdc->buf_pos < sizeof(fdc->buf))
@@ -581,7 +671,11 @@ void wd1770_tick(wd1770_t *fdc, int32_t cycles)
     /* 2. Type 2 transfer: ALLEEN actief als het commando al gestart is */
     if ((fdc->status & WD1770_STATUS_BUSY) && !fdc->type1_status)
     {
-        if (fdc->buf_pos < fdc->buf_count)
+        if ((fdc->command >> 4) == 0xF && fdc->track_pos >= fdc->track_size)
+        {
+            finish_write_track(fdc);
+        }
+        else if (fdc->buf_pos < fdc->buf_count)
         {
             set_drq(fdc, true);
         }

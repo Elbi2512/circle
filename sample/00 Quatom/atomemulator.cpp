@@ -582,7 +582,7 @@ static inline uint8_t BareMetalRand8(void)
   return (uint8_t)(s_nRandomSeed >> 16);
 }
 
-void CAtomEmulator::LoadROM(const char *pPath, int Size, int Offset)
+bool CAtomEmulator::LoadROM(const char *pPath, int Size, int Offset)
 {
   FIL File;
   char fullPath[256];
@@ -602,28 +602,23 @@ void CAtomEmulator::LoadROM(const char *pPath, int Size, int Offset)
   }
 
   FRESULT res = f_open(&File, fullPath, FA_READ | FA_OPEN_EXISTING);
-  if (res == FR_OK)
+  if (res != FR_OK)
   {
-    UINT bytesRead = 0;
-    res = f_read(&File, &m_pRom[Offset], Size, &bytesRead);
-    f_close(&File);
-    /*
-        if (res == FR_OK)
-        {
-          CLogger::Get()->Write("LoadROM", LogNotice, "Succes: %s geladen (%u bytes op 0x%04X)",
-                                fullPath, (unsigned)bytesRead, Offset);
-        }
-        else
-        {
-          CLogger::Get()->Write("LoadROM", LogError, "Leesfout bij bestand %s", fullPath);
-        }
-      }
-      else
-      {
-        CLogger::Get()->Write("LoadROM", LogError, "Kan ROM '%s' niet openen (FatFs Error: %d)", fullPath, (int)res);
-      } */
+    CLogger::Get()->Write("LoadROM", LogError, "Cannot open ROM '%s' (FatFs=%d)", fullPath, (int)res);
+    return false;
   }
-  CTimer::Get()->MsDelay(50);
+
+  UINT bytesRead = 0;
+  res = f_read(&File, &m_pRom[Offset], Size, &bytesRead);
+  f_close(&File);
+  if (res != FR_OK || bytesRead != (UINT)Size)
+  {
+    CLogger::Get()->Write("LoadROM", LogError, "Short/error reading ROM '%s' (%u/%d bytes)",
+                          fullPath, (unsigned)bytesRead, Size);
+    return false;
+  }
+
+  return true;
 }
 
 void CAtomEmulator::InitMem()
@@ -637,8 +632,7 @@ void CAtomEmulator::InitMem()
     m_pRom = new uint8_t[ROM_MEM_SIZE + RAM_ROM_SIZE];
   }
 
-  // Vul RAM initieel met 0x01 ipv 0x00
-  memset(m_pRam, 0x01, 0x10000);
+  memset(m_pRam, 0x00, 0x10000);
   memset(m_pRom, 0, ROM_MEM_SIZE + RAM_ROM_SIZE);
 
   m_pRam[8] = BareMetalRand8();
@@ -652,14 +646,15 @@ void CAtomEmulator::InitMem()
   m_bVRAMChanged = true;
 }
 
-void CAtomEmulator::LoadROMs()
+bool CAtomEmulator::LoadROMs()
 {
-  LoadROM("roms/akernel.rom", ROM_SIZE_ATOM, ROM_OFS_AKERNEL);
-  LoadROM("roms/dosrom.rom", ROM_SIZE_ATOM, ROM_OFS_DOSROM);
-  LoadROM("roms/afloat.rom", ROM_SIZE_ATOM, ROM_OFS_AFLOAT);
-  LoadROM("roms/abasic.rom", ROM_SIZE_ATOM, ROM_OFS_ABASIC);
-  LoadROM("roms/axr1.rom", ROM_SIZE_ATOM, ROM_OFS_UTILITY);
-  LoadROM("roms/ramrom.rom", RAM_ROM_SIZE, ROM_OFS_RAMROM);
+  bool ok = true;
+  ok &= LoadROM("roms/akernel.rom", ROM_SIZE_ATOM, ROM_OFS_AKERNEL);
+  ok &= LoadROM("roms/dosrom.rom", ROM_SIZE_ATOM, ROM_OFS_DOSROM);
+  ok &= LoadROM("roms/afloat.rom", ROM_SIZE_ATOM, ROM_OFS_AFLOAT);
+  ok &= LoadROM("roms/abasic.rom", ROM_SIZE_ATOM, ROM_OFS_ABASIC);
+  ok &= LoadROM("roms/axr1.rom", ROM_SIZE_ATOM, ROM_OFS_UTILITY);
+  ok &= LoadROM("roms/ramrom.rom", RAM_ROM_SIZE, ROM_OFS_RAMROM);
   /*
   Geheugenadres:   Hex-dump:     Assembler-instructie:
 $FF73            A9 0A         LDA #$0A       ; Laad waarde #0A (LineFeed)
@@ -675,6 +670,7 @@ $FF75
 #ifdef debugger
   memcpy(&m_pRam[0x2900], Invader + 0X16, sizeof(Invader) - 0x16);
 #endif
+  return ok;
 }
 
 void CAtomEmulator::SetDosRomPtr()
@@ -748,7 +744,11 @@ bool CAtomEmulator::Initialize(unsigned nCoreId)
   InitKeymap();
   InitMem();
 
-  LoadROMs();
+  if (!LoadROMs())
+  {
+    CLogger::Get()->Write("emulator", LogError, "Core %u: ROM set incomplete", nCoreId);
+    return false;
+  }
 
   m_ramrom_enable = true;
   m_main_ramflag = 5;
@@ -805,7 +805,7 @@ uint8_t CAtomEmulator::ReadMem(uint16_t addr)
   // 1. Shared pages tussen cores ($0400..$07FF)
   if (addr >= 0x0400 && addr <= 0x07FF)
   {
-    val = g_SharedAtomPages[addr - 0x0400]; // Correcte offset met addr!
+    val = __atomic_load_n(&g_SharedAtomPages[addr - 0x0400], __ATOMIC_ACQUIRE);
 #ifdef debugger
     m_Debugger.DebugRead(addr, val);
 #endif
@@ -964,11 +964,6 @@ uint8_t CAtomEmulator::ReadMem(uint16_t addr)
         break;
       }
     }
-    else if (addr == 0xBFE3) // enable or disable wifi config write
-    {
-      HandleWifiConfigWrite(val);
-      return 0;
-    }
     else if (addr == 0xBFE4) // wifi status read
     {
       return m_pKernel->GetWifiStatus(); // 0 = verbonden, 1 = niet verbonden
@@ -1032,7 +1027,7 @@ void CAtomEmulator::WriteMem(uint16_t addr, uint8_t val)
     // Alleen de eigenaar-core mag naar zijn eigen pagina schrijven
     if (m_nCoreId == page)
     {
-      g_SharedAtomPages[addr - 0x0400] = val;
+      __atomic_store_n(&g_SharedAtomPages[addr - 0x0400], val, __ATOMIC_RELEASE);
     }
     return;
   }
@@ -1112,18 +1107,8 @@ void CAtomEmulator::WriteMem(uint16_t addr, uint8_t val)
     uint8_t oldMode = m_nGfxMode;
 
     m_Pia.Write(addr, val);
-
-    // Alleen als Bit 7 hoog is (#D0, #F0), of als we expliciet naar 0x00 schrijven
-    // (voorkomt dat toetsenbordscans 0x01..0x09 de mode wiebelen)
-    if (val & 0x80)
-    {
-      m_nGfxMode = m_Pia.GetGfxMode();
-    }
-    else if (val == 0x00 && m_pc >= 0xC000)
-    {
-      // Terug naar tekst via CLEAR 0 / Reset
-      m_nGfxMode = 0;
-    }
+    m_nGfxMode = m_Pia.GetGfxMode();
+    m_nCss = m_Pia.GetCss();
 
     if (m_nGfxMode != oldMode)
     {
@@ -1184,6 +1169,11 @@ void CAtomEmulator::WriteMem(uint16_t addr, uint8_t val)
     if (addr == 0xBFE2)
     {
       m_nRtcIndex = val;
+      return;
+    }
+    if (addr == 0xBFE3)
+    {
+      HandleWifiConfigWrite(val);
       return;
     }
 

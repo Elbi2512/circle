@@ -4,12 +4,16 @@
 #include "roms.h"
 #include "bbc_cpu.h"
 #include "bbc_machine.h"
-#include "sn76489.h"
+//#include "sn76489.h"
 // #include "via6522.h"
-#include "bbc_memory.h"
-#include "bbc_tape.h"
+//#include "bbc_memory.h"
+//#include "bbc_tape.h"
 
-#define BBC_BUF_W 640 /* pixels per VGA line / BBC row */
+/* --------------------------------------------------------------------------
+ * Framebuffer dimensions (native BBC Micro visible area)
+ * -------------------------------------------------------------------------- */
+#define BBC_FB_WIDTH 640
+#define BBC_FB_HEIGHT 256
 
 static const char FromBeeb[] = "beeb";
 extern "C" void bbc_debug_log(const char *msg, unsigned val1, unsigned val2)
@@ -697,7 +701,7 @@ void CBeebRunner::RenderBBCFrame(void)
     const u32 fbHeight = m_pFrameBuffer->GetHeight();
 
     // Bronresolutie van de BBC Micro
-    const u32 srcW = BBC_BUF_W;     // 640
+    const u32 srcW = BBC_FB_WIDTH;     // 640
     const u32 srcH = BBC_FB_HEIGHT; // 256
 
     // Bereken integer schaalfactor zodat het binnen het scherm past

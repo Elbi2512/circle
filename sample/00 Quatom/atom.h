@@ -74,6 +74,7 @@ public:
     CAtomEmulator      *GetEmulator(unsigned nCore);
     CTextConsole       *GetConsole(void);
     CBcmFrameBuffer    *GetFrameBuffer(void) const;
+    void SetKernel(CKernel *pKernel);
 
     // Redraw helpers
     void InvalidateQuadrantVRAM(unsigned coreId);

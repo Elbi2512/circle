@@ -1,4 +1,5 @@
 #include "atom.h"
+#include "kernel.h"
 #include <circle/logger.h>
 #include <circle/util.h>
 
@@ -658,6 +659,15 @@ CTextConsole *CAtomRunner::GetConsole(void)
   return m_pConsole;
 }
 
+void CAtomRunner::SetKernel(CKernel *pKernel)
+{
+  for (unsigned core = 0; core < 4; ++core)
+  {
+    m_AtomEmulator[core].SetKernel(pKernel);
+    m_AtomEmulator[core].SetConsole(m_pConsole);
+  }
+}
+
 CBcmFrameBuffer *CAtomRunner::GetFrameBuffer(void) const
 {
   return m_pFrameBuffer;
@@ -676,6 +686,7 @@ boolean CAtomRunner::Initialize(void)
   m_pConsole = new CTextConsole(m_pFrameBuffer, 1040, 24, 0xFFFFFFFF, 0xFF080808);
   if (m_pConsole != NULL)
   {
+    SetKernel(CKernel::Get());
     bOK = TRUE;
     m_pConsole->WriteString("Quatom Multi-Core Monitor Ready.\r\n");
     m_pConsole->WriteString("-----------------------------------------\r\n");

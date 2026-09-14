@@ -132,6 +132,7 @@ typedef struct {
     /* Optional frame-ready callback */
     void (*on_frame)(void *ctx);
     void  *on_frame_ctx;
+    bool fdc_drq_pending;
 } bbc_machine_t;
 
 /* ------------------------------------------------------------------

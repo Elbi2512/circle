@@ -23,15 +23,7 @@ public:
   void SetCtrl(bool bCtrl) { m_bCtrl = bCtrl; }
   void SetRept(bool bRept) { m_bRept = bRept; }
 
-  // uint8_t GetGfxMode() const { return m_nGfxMode; }
-  uint8_t GetGfxMode() const
-  {
-    if (!(m_PortA & 0x80))
-      return 0;
-    uint8_t gm = (m_PortA >> 4) & 0x07;
-    static const uint8_t s_VdgModeMap[8] = {1, 3, 5, 7, 9, 13, 11, 15};
-    return s_VdgModeMap[gm];
-  }
+  uint8_t GetGfxMode() const { return (m_PortA >> 4) & 0x0F; }
   uint8_t GetCss() const { return m_nCss; }
 
 private:

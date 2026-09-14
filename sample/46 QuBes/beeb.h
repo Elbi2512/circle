@@ -114,7 +114,7 @@ extern "C"
 #endif
 #include "bbc_machine.h"
 #include "bbc_cpu.h"
-#include "bbc_memory.h"
+//#include "bbc_memory.h"
 #include "roms.h"
 #ifdef __cplusplus
 }

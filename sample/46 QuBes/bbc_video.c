@@ -27,7 +27,7 @@ static uint8_t s_current_scanline[BBC_INTERNAL_W];
 static int s_raster_y = 0;
 static int s_vis_col = 0;
 
-static inline uint32_t bbc_bitmap_ram_addr(uint16_t ma, uint8_t ra)
+static inline uint32_t bbc_bitmap_ram_addr(uint16_t ma, uint8_t ra, uint32_t screen_base)
 {
     /*
      * BBC Micro Model B hardware address decoding:
@@ -44,7 +44,13 @@ static inline uint32_t bbc_bitmap_ram_addr(uint16_t ma, uint8_t ra)
     {
         addr = (((ma & 0x1FFF) + 0x600) << 3) | (ra & 7);
     }
-    return addr & 0x7FFF;
+    addr = (addr + screen_base - BBC_SCREEN_BASE_MODE012) & 0x7FFF;
+    return addr;
+}
+
+static inline uint32_t bbc_mode7_ram_addr(uint16_t ma)
+{
+    return ((ma & 0x0800u) << 3) | 0x3C00u | (ma & 0x03FFu);
 }
 
 static void _vsync_cb(void *ctx, bool state)
@@ -76,6 +82,7 @@ void bbc_video_init(bbc_video_t *video, const uint8_t *system_ram, uint32_t ram_
 
     video->system_ram = system_ram;
     video->ram_size = ram_size;
+    video->screen_base = BBC_SCREEN_BASE_MODE012;
 
     mc6845_init(&video->crtc, MC6845_TYPE_MC6845);
     mc6845_set_vsync_callback(&video->crtc, _vsync_cb, video);
@@ -129,6 +136,11 @@ uint8_t bbc_video_crtc_read(bbc_video_t *video, uint8_t addr)
 void bbc_video_vidproc_write(bbc_video_t *video, uint8_t addr, uint8_t data)
 {
     bbc_video_ula_write(&video->ula, addr, data);
+}
+
+void bbc_video_set_screen_base(bbc_video_t *video, uint32_t base)
+{
+    video->screen_base = base & 0x7FFFu;
 }
 
 /* --------------------------------------------------------------------------
@@ -190,7 +202,7 @@ void bbc_video_tick(bbc_video_t *video)
     /* MODE 7 ------------------------------------------------------ */
     if (video->ula.teletext_mode)
     {
-        uint32_t ram_addr = (BBC_SCREEN_BASE_MODE7 + (out.ma & 0x3FF)) & 0x7FFF;
+        uint32_t ram_addr = bbc_mode7_ram_addr(out.ma);
 
         int scan_line = (int)(out.ra & 0x1F) >> 1;
         if (scan_line > 9)
@@ -222,7 +234,7 @@ void bbc_video_tick(bbc_video_t *video)
     }
 
     /* BITMAP MODES ------------------------------------------------ */
-    uint32_t ram_addr = bbc_bitmap_ram_addr(out.ma, out.ra);
+    uint32_t ram_addr = bbc_bitmap_ram_addr(out.ma, out.ra, video->screen_base);
     if (ram_addr < video->ram_size)
     {
         uint8_t data_byte = video->system_ram[ram_addr];

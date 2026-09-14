@@ -66,8 +66,8 @@ public:
     // Geheugen- en I/O-toegang
     uint8_t ReadMem(uint16_t addr);
     void WriteMem(uint16_t addr, uint8_t val);
-    void LoadROM(const char *pName, int Size, int Offset);
-    void LoadROMs();
+    bool LoadROM(const char *pName, int Size, int Offset);
+    bool LoadROMs();
 
     // Toetsenbord-interface
     void KeyDown(uint8_t scancode);
@@ -188,7 +188,7 @@ private:
     uint8_t  m_nRtcIndex{0};
     int      m_debugon{1};
     int      m_snow{0};
-    uint16_t m_vid_top{0x9C00};
+    uint16_t m_vid_top{0xA000};
     int      m_sndatomsid{0};
     bool     m_bVRAMChanged{true};
     bool     m_bFullRedrawNeeded{true};
