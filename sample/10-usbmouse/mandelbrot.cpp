@@ -14,7 +14,7 @@ static const char FromMandel[] = "mandel";
 
 // Dynamische Z-buffer en Backbuffer in het RAM voor flicker-vrije weergave
 static u16 *s_pZBuffer = 0;
-static u16 *s_pBackBuffer = 0;
+static u32 *s_pBackBuffer = 0;
 static unsigned s_nZBufferWidth = 0;
 static unsigned s_nZBufferHeight = 0;
 
@@ -91,7 +91,7 @@ boolean CMandelbrotCalculator::Initialize(void)
         s_nZBufferWidth = m_pScreen->GetWidth();
         s_nZBufferHeight = m_pScreen->GetHeight();
         s_pZBuffer = new u16[s_nZBufferWidth * s_nZBufferHeight];
-        s_pBackBuffer = new u16[s_nZBufferWidth * s_nZBufferHeight];
+            s_pBackBuffer = new u32[s_nZBufferWidth * s_nZBufferHeight];
     }
 
     return CMultiCoreSupport::Initialize();
@@ -228,6 +228,38 @@ static inline u32 IterationToColor(unsigned nIteration, unsigned maxIter, unsign
 
 void CMandelbrotCalculator::Draw3DLine(int x0, int y0, int x1, int y1, u32 color, u32 *pFB)
 {
+    if (!pFB || !m_pScreen)
+        return;
+
+    const int width = (int)m_pScreen->GetWidth();
+    const int height = (int)m_pScreen->GetHeight();
+    const int pitch = (int)(m_pFrameBuffer->GetPitch() / sizeof(u32));
+    const int dx = (x1 >= x0) ? (x1 - x0) : (x0 - x1);
+    const int dy = (y1 >= y0) ? (y0 - y1) : (y1 - y0);
+    const int sx = (x0 < x1) ? 1 : -1;
+    const int sy = (y0 < y1) ? 1 : -1;
+    int error = dx + dy;
+
+    for (;;)
+    {
+        if (x0 >= 0 && x0 < width && y0 >= 0 && y0 < height)
+            pFB[y0 * pitch + x0] = color;
+
+        if (x0 == x1 && y0 == y1)
+            break;
+
+        const int doubledError = 2 * error;
+        if (doubledError >= dy)
+        {
+            error += dy;
+            x0 += sx;
+        }
+        if (doubledError <= dx)
+        {
+            error += dx;
+            y0 += sy;
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -236,7 +268,7 @@ void CMandelbrotCalculator::Draw3DLine(int x0, int y0, int x1, int y1, u32 color
 static void FillTriangleZ(int x0, int y0, float z0,
                           int x1, int y1, float z1,
                           int x2, int y2, float z2,
-                          u32 color, u16 *pBackBuf, unsigned nBytesPerPixel,
+                          u32 color, u32 *pBackBuf, unsigned nBytesPerPixel,
                           int fbWidth, int fbHeight)
 {
     if (y0 > y1) { int tx = x0; x0 = x1; x1 = tx; int ty = y0; y0 = y1; y1 = ty; float tz = z0; z0 = z1; z1 = tz; }
@@ -247,8 +279,6 @@ static void FillTriangleZ(int x0, int y0, float z0,
 
     int total_height = y2 - y0;
     if (total_height == 0) return;
-
-    u16 color16 = (u16)color;
 
     for (int y = y0; y <= y2; y++)
     {
@@ -276,7 +306,7 @@ static void FillTriangleZ(int x0, int y0, float z0,
 
         if (ax <= bx)
         {
-            u16 *pLine = pBackBuf + (y * fbWidth);
+            u32 *pLine = pBackBuf + (y * fbWidth);
             u16 *pZLine = s_pZBuffer + (y * fbWidth);
             float span = (float)(bx - ax);
             float dz = (span > 0.0f) ? ((bz - az) / span) : 0.0f;
@@ -289,7 +319,7 @@ static void FillTriangleZ(int x0, int y0, float z0,
                 if (depthVal < pZLine[x])
                 {
                     pZLine[x] = depthVal;
-                    pLine[x] = color16;
+                    pLine[x] = color;
                 }
             }
         }
@@ -326,7 +356,15 @@ void CMandelbrotCalculator::CalculateGrid3D(unsigned nCore)
 
 u32 CMandelbrotCalculator::GetHeightColor(float h)
 {
-    return 0;
+    if (h < 0.0f)
+        h = 0.0f;
+    if (h > 1.0f)
+        h = 1.0f;
+
+    const u8 red = (u8)(32.0f + 223.0f * h);
+    const u8 green = (u8)(64.0f + 160.0f * (1.0f - h));
+    const u8 blue = (u8)(192.0f + 63.0f * (1.0f - h));
+    return 0xFF000000u | ((u32)red << 16) | ((u32)green << 8) | blue;
 }
 
 void CMandelbrotCalculator::StepCore0(void)
@@ -458,7 +496,7 @@ void CMandelbrotCalculator::RenderPerspective3D(void)
     const unsigned nBytesPerPixel = m_pFrameBuffer->GetDepth() / 8;
 
     // 1. Backbuffer en Z-buffer legen in het RAM (geen schermknippering!)
-    memset(s_pBackBuffer, 0, fbWidth * fbHeight * sizeof(u16));
+    memset(s_pBackBuffer, 0, fbWidth * fbHeight * sizeof(u32));
     memset(s_pZBuffer, 0xFF, fbWidth * fbHeight * sizeof(u16));
 
     // 2. Camerahoeken en projectie
@@ -542,7 +580,18 @@ void CMandelbrotCalculator::RenderPerspective3D(void)
     // 4. Blit de volledige backbuffer in één vloeiende beweging naar de actieve framebuffer
     for (unsigned y = 0; y < fbHeight; y++)
     {
-        memcpy(pRaw + y * nPitchBytes, s_pBackBuffer + (y * fbWidth), fbWidth * sizeof(u16));
+        u8 *pDst = pRaw + y * nPitchBytes;
+        const u32 *pSrc = s_pBackBuffer + y * fbWidth;
+        if (nBytesPerPixel == 4)
+        {
+            memcpy(pDst, pSrc, fbWidth * sizeof(u32));
+        }
+        else
+        {
+            u16 *pDst16 = (u16 *)pDst;
+            for (unsigned x = 0; x < fbWidth; ++x)
+                pDst16[x] = (u16)pSrc[x];
+        }
     }
 
     CleanDataCache();

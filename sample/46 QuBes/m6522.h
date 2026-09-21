@@ -125,7 +125,7 @@ typedef struct {
  * -------------------------------------------------------------------------- */
 typedef struct {
     uint16_t latch;    /* reload value (T2: only low byte is latched)  */
-    uint16_t counter;  /* current counter value                         */
+    int32_t counter;   /* current counter in 2 MHz cycles              */
     bool     t_bit;    /* toggles on underflow (T1: PB7; T2: fired)    */
     bool     t_out;    /* true for one tick at underflow                */
     uint8_t  pip;      /* 2-cycle count pipeline + 1-cycle load pipeline */
@@ -169,6 +169,12 @@ typedef struct {
     uint8_t irq_pip;
 
     m6522_callbacks_t cb;
+
+    /* Debug: count register accesses that should clear specific IFR bits */
+    uint32_t dbg_ora_reads;
+    uint32_t dbg_t1cl_reads;
+    uint32_t dbg_ifr_writes;
+    uint32_t dbg_pcr_writes;
 } m6522_t;
 
 /* --------------------------------------------------------------------------

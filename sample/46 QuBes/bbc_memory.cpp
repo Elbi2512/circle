@@ -43,7 +43,7 @@ uint8_t bbc_mem_read(bbc_machine_t *m, uint16_t addr)
     {
         return m->mem.os_rom[addr - 0xC000];
     }
-    // 0xFC00 - 0xFEFF: Hardware I/O gebied (FRED, JIM, SHEILA)
+    // 0xFC00 - 0xFEFF: Hardware I/O area; unmapped reads fall through to ROM.
     else if (addr < 0xFF00)
     {
         bbc_io_timing(m);
@@ -51,7 +51,7 @@ uint8_t bbc_mem_read(bbc_machine_t *m, uint16_t addr)
         {
             return bbc_io_read(m, addr); // SHEILA
         }
-        return 0xFF; // FRED/JIM niet actief
+        return m->mem.os_rom[addr - 0xC000];
     }
     // 0xFF00 - 0xFFFF: OS 1.20 ROM (Vectors & reset code)
     else
@@ -66,6 +66,39 @@ void bbc_mem_write(bbc_machine_t *m, uint16_t addr, uint8_t val)
     if (addr < 0x8000)
     {
         m->mem.main_ram[addr] = val;
+
+        /* Debug: track writes into the Mode 7 screen memory region so we can
+         * see what MOS is actually storing there (e.g. fill byte on scroll). */
+        if (addr >= 0x3C00 && addr < 0x4000)
+        {
+            m->dbg_mode7_last_addr = addr;
+            m->dbg_mode7_last_val = val;
+            m->dbg_mode7_last_pc = m->cpu ? vrEmu6502GetPC(m->cpu) : 0;
+            m->dbg_mode7_last_x = m->cpu ? vrEmu6502GetX(m->cpu) : 0;
+            m->dbg_mode7_last_y = m->cpu ? vrEmu6502GetY(m->cpu) : 0;
+            m->dbg_mode7_zp_d8 = m->mem.main_ram[0x00D8];
+            m->dbg_mode7_zp_d9 = m->mem.main_ram[0x00D9];
+            m->dbg_mode7_zp_f0 = m->mem.main_ram[0x00F0];
+            m->dbg_mode7_zp_88 = m->mem.main_ram[0x0088];
+            m->dbg_mode7_zp_de = m->mem.main_ram[0x00DE];
+            m->dbg_mode7_zp_df = m->mem.main_ram[0x00DF];
+            m->dbg_mode7_write_count++;
+        }
+        else if (addr >= 0x7C00)
+        {
+            m->dbg_mode7_last_addr = addr;
+            m->dbg_mode7_last_val = val;
+            m->dbg_mode7_last_pc = m->cpu ? vrEmu6502GetPC(m->cpu) : 0;
+            m->dbg_mode7_last_x = m->cpu ? vrEmu6502GetX(m->cpu) : 0;
+            m->dbg_mode7_last_y = m->cpu ? vrEmu6502GetY(m->cpu) : 0;
+            m->dbg_mode7_zp_d8 = m->mem.main_ram[0x00D8];
+            m->dbg_mode7_zp_d9 = m->mem.main_ram[0x00D9];
+            m->dbg_mode7_zp_f0 = m->mem.main_ram[0x00F0];
+            m->dbg_mode7_zp_88 = m->mem.main_ram[0x0088];
+            m->dbg_mode7_zp_de = m->mem.main_ram[0x00DE];
+            m->dbg_mode7_zp_df = m->mem.main_ram[0x00DF];
+            m->dbg_mode7_write_count++;
+        }
     }
     // 0x8000 - 0xBFFF: Sideways RAM ondersteuning
     else if (addr < 0xC000)

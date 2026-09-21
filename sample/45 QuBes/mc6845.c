@@ -222,6 +222,25 @@ mc6845_output_t mc6845_tick(mc6845_t *c)
         }
     }
 
+    /* Latch cursor visibility across the raster lines of the cursor cell. */
+    c->cursor_on = false;
+    uint16_t cursor_addr = mc6845_get_cursor_addr(c);
+    if (c->h_de && c->v_de && c->ma == cursor_addr)
+    {
+        if (c->r_ctr == 0)
+            c->cursor_line_ff = false;
+        if (c->r_ctr == (c->cursor_start & 0x1F))
+            c->cursor_line_ff = true;
+
+        uint8_t cursor_mode = (c->cursor_start >> 5) & 0x03;
+        bool cursor_visible = cursor_mode == 0 ||
+                              (cursor_mode >= 2 && c->cursor_blink_state);
+        c->cursor_on = c->cursor_line_ff && cursor_visible;
+
+        if (c->r_ctr == (c->cursor_end & 0x1F))
+            c->cursor_line_ff = false;
+    }
+
     /* ---- OUTPUT ---- */
     mc6845_output_t out;
     out.ma = c->ma & 0x3FFF;
@@ -245,4 +264,11 @@ void mc6845_set_vsync_callback(mc6845_t *c, void (*cb)(void *ctx, bool state), v
 {
     c->vsync_cb = cb;
     c->vsync_ctx = ctx;
+}
+
+void mc6845_toggle_cursor_blink(mc6845_t *c)
+{
+    uint8_t cursor_mode = (c->cursor_start >> 5) & 0x03;
+    if (cursor_mode >= 2)
+        c->cursor_blink_state = !c->cursor_blink_state;
 }

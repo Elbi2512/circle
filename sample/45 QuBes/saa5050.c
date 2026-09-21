@@ -401,6 +401,10 @@ RENDER_IRAM void saa5050_render_char(saa5050_t *tt, saa5050_line_state_t *ls,
         /* DH bottom half: line_addr = (scanline/2)+5, clamped to 0-9 */
         la = (uint8_t)((sc >> 1) + 5);
         if (la > 9) la = 9;
+    } else if (ls->double_height) {
+        /* DH top half: stretch ROM rows 0-4 over the full top half. */
+        la = (uint8_t)(sc >> 2);
+        if (la > 4) la = 4;
     } else {
         /* Normal: line_addr = scanline/2 */
         la = (uint8_t)(sc >> 1);

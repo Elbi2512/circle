@@ -74,3 +74,4 @@ Change log:
 0.92 – Fixed scale‑up for modes 3, 7, and 11; fixed screen cleanup after F9 full‑screen centered, back to windowed mode
        added: check if connected to the actual network and reflect status on #BFE4
 0.93 - bugfix (11) findings
+0.94 - bugfix, due to double check if I forgot some minor adjustments (And I did...) 

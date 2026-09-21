@@ -12,7 +12,7 @@
 #include "bbc_video.h"
 
 #define BBC_INTERNAL_W 640
-#define BBC_INTERNAL_H 512
+#define BBC_INTERNAL_H 256
 
 #define BBC_MODE7_W 240
 #define BBC_MODE7_H 250
@@ -20,31 +20,47 @@
 extern void bbc_debug_log(const char *msg, unsigned val1, unsigned val2);
 
 /* Interne frame-buffers */
-static uint8_t s_bbc_screen[BBC_INTERNAL_H][BBC_INTERNAL_W];
-static uint8_t s_mode7_screen[BBC_MODE7_H][BBC_MODE7_W];
+static uint8_t s_bbc_screen[2][BBC_INTERNAL_H][BBC_INTERNAL_W];
+static uint8_t s_mode7_screen[2][BBC_MODE7_H][BBC_MODE7_W];
+static volatile uint8_t s_display_buffer = 0;
+static uint8_t s_render_buffer = 1;
 
 static uint8_t s_current_scanline[BBC_INTERNAL_W];
 static int s_raster_y = 0;
 static int s_vis_col = 0;
+static saa5050_line_state_t s_mode7_ls;
 
-static inline uint32_t bbc_bitmap_ram_addr(uint16_t ma, uint8_t ra)
+static inline uint32_t bbc_bitmap_ram_addr(uint16_t ma, uint8_t ra, uint32_t screen_base)
 {
-    /*
-     * BBC Micro Model B hardware address decoding:
-     * De 6845 MA lijnen lopen via de Video ULA adres-shifter.
-     * In Mode 0..2 (20KB scherm) start het geheugen bij 0x3000.
-     * Het adres wikkelt hardwarematig rond op bit 13/14.
-     */
-    uint32_t addr;
-    if (ma & 0x2000)
+    /* Match BeebEm: the ULA subtracts the selected screen length when the
+     * shifted CRTC address crosses bit 15. */
+    uint32_t screen_length = 0x2000;
+    switch (screen_base & 0x7FFFu)
     {
-        addr = ((ma & 0x1FFF) << 3) | (ra & 7);
+    case BBC_SCREEN_BASE_MODE3:
+        screen_length = 0x4000;
+        break;
+    case BBC_SCREEN_BASE_MODE6:
+        screen_length = 0x5000;
+        break;
+    case BBC_SCREEN_BASE_MODE45:
+        screen_length = 0x2800;
+        break;
+    default:
+        break;
     }
-    else
-    {
-        addr = (((ma & 0x1FFF) + 0x600) << 3) | (ra & 7);
-    }
-    return addr & 0x7FFF;
+
+    /* BeebEm performs this shift in the 16-bit video address domain before
+     * testing bit 15 and subtracting the selected screen length. */
+    uint32_t addr = ((((uint32_t)ma << 3) | (ra & 0x07)) & 0xFFFFu);
+    if (addr & 0x8000u)
+        addr -= screen_length;
+    return addr & 0x7FFFu;
+}
+
+static inline uint32_t bbc_mode7_ram_addr(uint16_t ma)
+{
+    return ((ma & 0x0800u) << 3) | 0x3C00u | (ma & 0x03FFu);
 }
 
 static void _vsync_cb(void *ctx, bool state)
@@ -53,8 +69,13 @@ static void _vsync_cb(void *ctx, bool state)
 
     if (state)
     {
+        asm volatile("dmb sy" ::: "memory");
+        s_display_buffer = s_render_buffer;
+        s_render_buffer ^= 1;
+
         /* VSYNC rising edge: reset raster scanline teller voor nieuw frame */
         s_raster_y = -1; /* -1 betekent: wacht tot het actieve beeld (v_de) begint */
+        saa5050_reset_frame(&video->teletext);
     }
 
     if (video->vsync_cb)
@@ -70,12 +91,16 @@ void bbc_video_init(bbc_video_t *video, const uint8_t *system_ram, uint32_t ram_
     memset(s_bbc_screen, 0, sizeof(s_bbc_screen));
     memset(s_mode7_screen, 0, sizeof(s_mode7_screen));
     memset(s_current_scanline, 0, sizeof(s_current_scanline));
+    memset(&s_mode7_ls, 0, sizeof(s_mode7_ls));
 
     s_raster_y = 0;
     s_vis_col = 0;
+    s_display_buffer = 0;
+    s_render_buffer = 1;
 
     video->system_ram = system_ram;
     video->ram_size = ram_size;
+    video->screen_base = BBC_SCREEN_BASE_MODE012;
 
     mc6845_init(&video->crtc, MC6845_TYPE_MC6845);
     mc6845_set_vsync_callback(&video->crtc, _vsync_cb, video);
@@ -131,6 +156,11 @@ void bbc_video_vidproc_write(bbc_video_t *video, uint8_t addr, uint8_t data)
     bbc_video_ula_write(&video->ula, addr, data);
 }
 
+void bbc_video_set_screen_base(bbc_video_t *video, uint32_t base)
+{
+    video->screen_base = base & 0x7FFFu;
+}
+
 /* --------------------------------------------------------------------------
  * Cyclus-exacte tick: draait synchroon mee met de 6502 CPU klok
  * -------------------------------------------------------------------------- */
@@ -138,6 +168,7 @@ void bbc_video_tick(bbc_video_t *video)
 {
     const mc6845_t *crtc = &video->crtc;
     uint8_t old_h_ctr = crtc->h_ctr;
+    uint8_t old_r_ctr = crtc->r_ctr;
 
     mc6845_output_t out = mc6845_tick(&video->crtc);
 
@@ -163,18 +194,23 @@ void bbc_video_tick(bbc_video_t *video)
     /* Einde scanline */
     if (old_h_ctr == crtc->h_total)
     {
+        if (video->ula.teletext_mode && crtc->r_ctr == 0 && old_r_ctr != 0)
+        {
+            saa5050_end_row(&video->teletext);
+            saa5050_start_row(&video->teletext, (uint8_t)crtc->v_ctr);
+        }
         if (video->ula.teletext_mode)
         {
             if (raster_y_mode7 >= 0 && raster_y_mode7 < BBC_MODE7_H)
             {
-                memcpy(s_mode7_screen[raster_y_mode7], s_current_scanline, BBC_MODE7_W);
+                memcpy(s_mode7_screen[s_render_buffer][raster_y_mode7], s_current_scanline, BBC_MODE7_W);
             }
         }
         else
         {
             if (raster_y >= 0 && raster_y < BBC_INTERNAL_H)
             {
-                memcpy(s_bbc_screen[raster_y], s_current_scanline, BBC_INTERNAL_W);
+                memcpy(s_bbc_screen[s_render_buffer][raster_y], s_current_scanline, BBC_INTERNAL_W);
             }
         }
 
@@ -190,7 +226,15 @@ void bbc_video_tick(bbc_video_t *video)
     /* MODE 7 ------------------------------------------------------ */
     if (video->ula.teletext_mode)
     {
-        uint32_t ram_addr = (BBC_SCREEN_BASE_MODE7 + (out.ma & 0x3FF)) & 0x7FFF;
+        uint32_t ram_addr = bbc_mode7_ram_addr(out.ma);
+        uint32_t cursor_addr = bbc_mode7_ram_addr(mc6845_get_cursor_addr(&video->crtc));
+        uint8_t cursor_mode = (video->crtc.cursor_start >> 5) & 0x03;
+        bool cursor_visible = cursor_mode == 0 ||
+                      (cursor_mode >= 2 && video->crtc.cursor_blink_state);
+        bool cursor_in_range = video->crtc.r_ctr >= (video->crtc.cursor_start & 0x1F) &&
+                       video->crtc.r_ctr <= (video->crtc.cursor_end & 0x1F);
+        bool cursor_active = out.cursor ||
+                     (ram_addr == cursor_addr && cursor_visible && cursor_in_range);
 
         int scan_line = (int)(out.ra & 0x1F) >> 1;
         if (scan_line > 9)
@@ -199,12 +243,11 @@ void bbc_video_tick(bbc_video_t *video)
         if (ram_addr < video->ram_size && col < 40)
         {
             uint8_t code = video->system_ram[ram_addr] & 0x7F;
-            saa5050_line_state_t ls;
-
-            saa5050_start_scanline(&video->teletext, &ls, (uint8_t)scan_line);
+            if (col == 0)
+                saa5050_start_scanline(&video->teletext, &s_mode7_ls, (uint8_t)(out.ra & 0x1F));
 
             uint8_t pixels[SAA5050_PIXELS_PER_CHAR];
-            saa5050_render_char(&video->teletext, &ls, code, pixels);
+            saa5050_render_char(&video->teletext, &s_mode7_ls, code, pixels);
 
             const int CHAR_WIDTH = 6;
             int base_x = col * CHAR_WIDTH;
@@ -215,21 +258,24 @@ void bbc_video_tick(bbc_video_t *video)
                 int out_x = base_x + dst_px;
 
                 if (out_x < BBC_MODE7_W)
-                    s_current_scanline[out_x] = pixels[src_px] & 7;
+                {
+                    uint8_t pixel = pixels[src_px] & 7;
+                    s_current_scanline[out_x] = cursor_active ? (pixel ^ 7) : pixel;
+                }
             }
         }
         return;
     }
 
     /* BITMAP MODES ------------------------------------------------ */
-    uint32_t ram_addr = bbc_bitmap_ram_addr(out.ma, out.ra);
+    uint32_t ram_addr = bbc_bitmap_ram_addr(out.ma, out.ra, video->screen_base);
     if (ram_addr < video->ram_size)
     {
         uint8_t data_byte = video->system_ram[ram_addr];
         uint8_t colours[8];
         int npx = bbc_video_ula_serialize(&video->ula, data_byte, colours, out.cursor);
 
-        int h_pixels = video->ula.crtc_2mhz ? 4 : 8;
+        int h_pixels = video->ula.crtc_2mhz ? 8 : 16;
         int base_x = col * h_pixels;
 
         for (int dst_px = 0; dst_px < h_pixels; dst_px++)
@@ -283,7 +329,7 @@ void bbc_video_render_row(const bbc_video_t *video,
             if (src_x >= SRC_W)
                 src_x = SRC_W - 1;
 
-            out_pixels[x] = s_mode7_screen[src_y][src_x];
+            out_pixels[x] = s_mode7_screen[s_display_buffer][src_y][src_x];
         }
         return;
     }
@@ -293,5 +339,5 @@ void bbc_video_render_row(const bbc_video_t *video,
         src_y = BBC_INTERNAL_H - 1;
 
     int copy_w = (out_width < BBC_INTERNAL_W) ? out_width : BBC_INTERNAL_W;
-    memcpy(out_pixels, s_bbc_screen[src_y], copy_w);
+    memcpy(out_pixels, s_bbc_screen[s_display_buffer][src_y], copy_w);
 }

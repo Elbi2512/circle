@@ -21,6 +21,9 @@ static bool sv_keyboard_read(void *ctx, uint8_t row, uint8_t col);
 static void sv_latch_changed(void *ctx, uint8_t latch_bits);
 static void sv_irq(void *ctx, bool state);
 static int s_fdc_trace_count = 0;
+static unsigned s_fdc_trace_commands = 0;
+static unsigned s_fdc_trace_bytes = 0;
+static unsigned s_fdc_nmi_trace = 0;
 
 /* uservia callbacks */
 static void uv_port_out(void *ctx, uint8_t port, uint8_t val, uint8_t ddr);
@@ -302,6 +305,8 @@ void bbc_machine_set_frame_callback(bbc_machine_t *m,
 static void sv_latch_changed(void *ctx, uint8_t latch_bits)
 {
     bbc_machine_t *m = (bbc_machine_t *)ctx;
+    static const uint32_t screen_bases[4] = { 0x4000, 0x6000, 0x3000, 0x5800 };
+    bbc_video_set_screen_base(&m->video, screen_bases[(latch_bits >> 4) & 3]);
     if (!(latch_bits & (1u << BBC_LATCH_SOUND_WE)))
     {
         uint8_t pa_data = m6522_get_port_a(&m->sysvia.via);
@@ -363,12 +368,6 @@ static int fdc_read_sector(void *ctx,
 {
     bbc_machine_t *m = (bbc_machine_t *)ctx;
     if (!m->disk_read_sector)
-        return -1;
-
-    /* Standaard Acorn DFS single-density (.ssd / .dsd):
-     * Maximaal 10 sectoren per track (0 t/m 9).
-     * Sector >= 10 triggert via fault() direct WD1770_STATUS_RNF */
-    if (sector >= 10)
         return -1;
 
     return m->disk_read_sector(m->disk_ctx, drive, track, sector, side, density, buf, len);
@@ -512,7 +511,14 @@ static void fdc_irq(void *ctx, bool state)
 
     if (state)
     {
-       // bbc_debug_log("FDC INTRQ actief -> NMI afgevuurd naar CPU", 0, 0);
+        if (s_fdc_nmi_trace < 32)
+        {
+            bbc_debug_log("FDC INTRQ NMI pc", (unsigned)bbc_cpu_get_pc(m->cpu),
+                          ((unsigned)m->fdc.track << 8) | m->fdc.sector);
+            s_fdc_nmi_trace++;
+        }
+        if (s_fdc_trace_commands <= 20)
+            bbc_debug_log("FDC TRACE INTRQ bytes/sector", s_fdc_trace_bytes, m->fdc.sector);
         bbc_cpu_nmi(m->cpu);
     }
 }
@@ -521,9 +527,14 @@ static void fdc_drq(void *ctx, bool state)
 {
     bbc_machine_t *m = (bbc_machine_t *)ctx;
 
-    /* Elke opgaande flank (0 -> 1) van DRQ vuurt een NMI af naar de CPU */
     if (state && !m->fdc_drq_state)
     {
+        if (s_fdc_nmi_trace < 32)
+        {
+            bbc_debug_log("FDC DRQ NMI pc", (unsigned)bbc_cpu_get_pc(m->cpu),
+                          ((unsigned)m->fdc.track << 8) | m->fdc.sector);
+            s_fdc_nmi_trace++;
+        }
         bbc_cpu_nmi(m->cpu);
     }
 
@@ -544,28 +555,23 @@ static uint8_t io_fdc_read(uint16_t addr, void *ctx)
     if (reg == 0) // &FE84: Acorn 1770 Status / DRQ Latch
     {
         uint8_t raw = wd1770_read(&m->fdc, 0);
-        uint8_t val;
+        if (s_fdc_trace_commands <= 20 && !(raw & WD1770_STATUS_BUSY))
+            bbc_debug_log("FDC TRACE idle status/bytes", raw, s_fdc_trace_bytes);
 
-        m->fdc.intrq = false;
-
-        if (m->fdc_drq_state)
-        {
-            val = raw & ~0x80; // DRQ actief: bit 7 = 0
-        }
-        else
-        {
-            val = (raw & 0x7E) | 0x80; // DRQ inactief: bit 7 = 1
-
-            if (!(raw & (WD1770_STATUS_RNF | WD1770_STATUS_CRC_ERROR | WD1770_STATUS_LOST_DATA)))
-            {
-                val &= ~0x1C;
-            }
-        }
-
-        return val;
+        /* The BBC interface exposes DRQ as an active-low bit 7 latch. */
+        return (raw & 0x7F) | (m->fdc_drq_state ? 0 : 0x80);
     }
     else if (reg == 3) // &FE87: Data register
     {
+        /* Real BBC hardware only clears the external DRQ latch when the CPU is
+         * actually reading a valid byte. A late or spurious read after transfer
+         * completion must not restart or advance the transfer state. */
+        if (!m->fdc_drq_state || !(m->fdc.status & WD1770_STATUS_BUSY) ||
+            m->fdc.type1_status || m->fdc.buf_pos >= m->fdc.buf_count)
+        {
+            return m->fdc.data;
+        }
+
         static int byte_count = 0;
         byte_count++;
         if (byte_count == 1 || byte_count == 256)
@@ -576,6 +582,9 @@ static uint8_t io_fdc_read(uint16_t addr, void *ctx)
         }
 
         m->fdc_drq_state = false;
+        s_fdc_trace_bytes++;
+        if (s_fdc_trace_commands <= 20 && s_fdc_trace_bytes == 256)
+            bbc_debug_log("FDC TRACE 256 bytes/sector", m->fdc.sector, m->fdc.status);
         return wd1770_read(&m->fdc, 3);
     }
 
@@ -603,6 +612,15 @@ static void io_fdc_write(uint16_t addr, uint8_t val, void *ctx)
     if (reg == 0) // &FE84: Command register
     {
         bbc_debug_log("FDC Command gestart: cmd =", (unsigned)val, (unsigned)bbc_cpu_get_pc(m->cpu));
+
+        if (s_fdc_trace_commands < 20)
+        {
+            bbc_debug_log("FDC TRACE cmd/track/sector",
+                          ((unsigned)val << 16) | ((unsigned)m->fdc.track << 8) | m->fdc.sector,
+                          s_fdc_trace_bytes);
+        }
+        s_fdc_trace_commands++;
+        s_fdc_trace_bytes = 0;
 
         if ((val & 0xE0) == 0x80) // Read sector commando
         {

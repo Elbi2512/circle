@@ -171,6 +171,9 @@ void mc6845_set_vsync_callback(mc6845_t *crtc,
                                 void (*cb)(void *ctx, bool state),
                                 void *ctx);
 
+/* Advance the cursor blink phase once per displayed frame. */
+void mc6845_toggle_cursor_blink(mc6845_t *crtc);
+
 /* Helpers */
 static inline uint16_t mc6845_get_start_addr(const mc6845_t *crtc) {
     return ((uint16_t)(crtc->start_addr_hi & 0x3F) << 8) | crtc->start_addr_lo;

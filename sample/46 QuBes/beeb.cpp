@@ -4,6 +4,7 @@
 #include "roms.h"
 #include "bbc_cpu.h"
 #include "bbc_machine.h"
+#include "vrEmu6502.h"
 //#include "sn76489.h"
 // #include "via6522.h"
 //#include "bbc_memory.h"
@@ -15,7 +16,220 @@
 #define BBC_FB_WIDTH 640
 #define BBC_FB_HEIGHT 256
 
+/* Set to 1 to bypass the whole BBC/CRTC/Teletext pipeline and just draw a
+ * static "HELLO WORLD" text directly into the HDMI framebuffer. Used to
+ * verify the display/scaling path independently of the emulator. */
+#define BBC_VIDEO_TEST_PATTERN 0
+
+/* Set to 1 to periodically dump CPU/CRTC/video-RAM state to the debug log
+ * (once per second), instead of only relying on the HDMI screen. */
+#define BBC_VIDEO_DEBUG_LOG 1
+
+/* Set to 1 to skip mounting/auto-booting a disk image entirely, to check
+ * whether the emulator reaches a normal BASIC prompt without DFS/FDC involved. */
+#define BBC_SKIP_DISK_BOOT 1
+
 static const char FromBeeb[] = "beeb";
+
+/* Counters to detect a disk boot retry loop (incremented in DiskReadSector/
+ * DiskWriteSector below, read from DumpEmulatorDebug). */
+static volatile uint32_t s_diskReadCalls  = 0;
+static volatile uint32_t s_diskReadFails  = 0;
+static volatile uint32_t s_diskWriteCalls = 0;
+
+#if BBC_VIDEO_TEST_PATTERN
+extern "C" const uint8_t saa5050_builtin_rom[96][10][6];
+
+static void DrawTestPattern(u32 *pFB, u32 fbPitchWords, u32 fbWidth, u32 fbHeight)
+{
+    static const char msg[] = "HELLO WORLD 12345";
+    const int scale = 4;
+    const int charW = 6 * scale;
+    const int startX = 40;
+    const int startY = 40;
+
+    for (u32 y = 0; y < fbHeight; y++)
+    {
+        u32 color = (y < fbHeight / 2) ? 0xFF0000FF : 0xFF008000; /* blue / green split */
+        for (u32 x = 0; x < fbWidth; x++)
+        {
+            pFB[y * fbPitchWords + x] = color;
+        }
+    }
+
+    for (size_t i = 0; i < sizeof(msg) - 1; i++)
+    {
+        char c = msg[i];
+        if (c < 0x20 || c >= 0x20 + 96)
+            continue;
+        int idx = c - 0x20;
+
+        for (int row = 0; row < 10; row++)
+        {
+            for (int col = 0; col < 6; col++)
+            {
+                if (!saa5050_builtin_rom[idx][row][col])
+                    continue;
+
+                for (int sy = 0; sy < scale; sy++)
+                {
+                    for (int sx = 0; sx < scale; sx++)
+                    {
+                        int px = startX + (int)i * charW + col * scale + sx;
+                        int py = startY + row * scale + sy;
+                        if (px >= 0 && px < (int)fbWidth && py >= 0 && py < (int)fbHeight)
+                        {
+                            pFB[py * fbPitchWords + px] = 0xFFFFFFFF;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /* Border box so scaling/centering issues are obvious too */
+    for (u32 x = 0; x < fbWidth; x++)
+    {
+        pFB[0 * fbPitchWords + x] = 0xFFFF0000;
+        pFB[(fbHeight - 1) * fbPitchWords + x] = 0xFFFF0000;
+    }
+    for (u32 y = 0; y < fbHeight; y++)
+    {
+        pFB[y * fbPitchWords + 0] = 0xFFFF0000;
+        pFB[y * fbPitchWords + (fbWidth - 1)] = 0xFFFF0000;
+    }
+}
+#endif
+
+/* --------------------------------------------------------------------------
+ * Debug dump: reroute emulator video/CPU state to the Circle debug log
+ * instead of (or in addition to) the HDMI screen, for headless diagnosis.
+ * -------------------------------------------------------------------------- */
+static void DumpEmulatorDebug(bbc_machine_t *m)
+{
+    const mc6845_t *crtc = &m->video.crtc;
+    uint16_t start_addr = mc6845_get_start_addr(crtc);
+    bool teletext = m->video.ula.teletext_mode;
+    uint16_t pc = m->cpu ? vrEmu6502GetPC(m->cpu) : 0;
+    uint8_t acc = m->cpu ? vrEmu6502GetAcc(m->cpu) : 0;
+    uint8_t xr = m->cpu ? vrEmu6502GetX(m->cpu) : 0;
+    uint8_t yr = m->cpu ? vrEmu6502GetY(m->cpu) : 0;
+    uint8_t sp = m->cpu ? vrEmu6502GetStackPointer(m->cpu) : 0;
+    uint8_t opcode = m->cpu ? vrEmu6502GetCurrentOpcode(m->cpu) : 0;
+    uint8_t reset_lo = m->mem.os_rom[0x3FFC];
+    uint8_t reset_hi = m->mem.os_rom[0x3FFD];
+
+    /* Prove the CPU is actually making forward progress (not stuck in a
+     * tight 1-2 instruction loop) by comparing against the previous sample. */
+    static uint64_t s_lastCyc = 0;
+    static uint16_t s_lastPc  = 0xFFFF;
+    static uint16_t s_minPc   = 0xFFFF;
+    static uint16_t s_maxPc   = 0x0000;
+    uint64_t deltaCyc = m->total_cycles - s_lastCyc;
+    bool pcMoved = (pc != s_lastPc);
+    if (pc < s_minPc) s_minPc = pc;
+    if (pc > s_maxPc) s_maxPc = pc;
+    s_lastCyc = m->total_cycles;
+    s_lastPc  = pc;
+
+    CLogger::Get()->Write(FromBeeb, LogNotice,
+                          "DBG pc=%04X op=%02X a=%02X x=%02X y=%02X sp=%02X cyc=%llu (+%llu/s) resetVec=%02X%02X",
+                          pc, opcode, acc, xr, yr, sp, (unsigned long long)m->total_cycles,
+                          (unsigned long long)deltaCyc, reset_hi, reset_lo);
+
+    CLogger::Get()->Write(FromBeeb, LogNotice,
+                          "DBG progress: pcMoved=%d pcRange=[%04X..%04X]", pcMoved, s_minPc, s_maxPc);
+
+    CLogger::Get()->Write(FromBeeb, LogNotice,
+                          "DBG teletext=%d ulaCtrl=%02X R9=%u startAddr=%04X vCtr=%u rCtr=%u",
+                          teletext, m->video.ula.control, crtc->max_scanline_addr,
+                          start_addr, crtc->v_ctr, crtc->r_ctr);
+
+    CLogger::Get()->Write(FromBeeb, LogNotice,
+                          "DBG disk reads=%u fails=%u writes=%u",
+                          s_diskReadCalls, s_diskReadFails, s_diskWriteCalls);
+
+    static uint32_t s_lastIrqCount = 0;
+    uint32_t irqDelta = m->dbg_irq_count - s_lastIrqCount;
+    s_lastIrqCount = m->dbg_irq_count;
+    CLogger::Get()->Write(FromBeeb, LogNotice,
+                          "DBG sysvia irq_edges=%u (+%u) ier=%02X ifr=%02X acr=%02X t1lat=%04X t1cnt=%04X t2lat=%04X t2cnt=%04X",
+                          m->dbg_irq_count, irqDelta,
+                          m->sysvia.via.ier, m->sysvia.via.ifr, m->sysvia.via.acr,
+                          m->sysvia.via.t1.latch, m->sysvia.via.t1.counter,
+                          m->sysvia.via.t2.latch, m->sysvia.via.t2.counter);
+
+    CLogger::Get()->Write(FromBeeb, LogNotice,
+                          "DBG sysvia pcr=%02X ora_reads=%u t1cl_reads=%u ifr_writes=%u pcr_writes=%u",
+                          m->sysvia.via.pcr, m->sysvia.via.dbg_ora_reads,
+                          m->sysvia.via.dbg_t1cl_reads, m->sysvia.via.dbg_ifr_writes,
+                          m->sysvia.via.dbg_pcr_writes);
+
+    CLogger::Get()->Write(FromBeeb, LogNotice,
+                          "DBG mode7 writes count=%u lastAddr=%04X lastVal=%02X fromPC=%04X x=%02X y=%02X",
+                          m->dbg_mode7_write_count, m->dbg_mode7_last_addr,
+                          m->dbg_mode7_last_val, m->dbg_mode7_last_pc,
+                          m->dbg_mode7_last_x, m->dbg_mode7_last_y);
+
+    CLogger::Get()->Write(FromBeeb, LogNotice,
+                          "DBG mode7 zp @write: $D8=%02X $D9=%02X $F0=%02X $88=%02X $DE=%02X $DF=%02X",
+                          m->dbg_mode7_zp_d8, m->dbg_mode7_zp_d9,
+                          m->dbg_mode7_zp_f0, m->dbg_mode7_zp_88,
+                          m->dbg_mode7_zp_de, m->dbg_mode7_zp_df);
+
+    /* One-time raw OS ROM byte dump around the addresses seen doing the
+     * repeated writes, so the actual 6502 instructions can be inspected. */
+    static bool s_romDumped = false;
+    if (!s_romDumped)
+    {
+        s_romDumped = true;
+        static const uint16_t regions[] = { 0xCEC0, 0xCFC0, 0xC4C0, 0xAEE0, 0xE0A0, 0xC4A0 };
+        for (unsigned r = 0; r < sizeof(regions) / sizeof(regions[0]); r++)
+        {
+            uint16_t base = regions[r];
+            char hex[3 * 32 + 1];
+            for (int i = 0; i < 32; i++)
+            {
+                uint8_t b = m->mem.os_rom[(base + i) - 0xC000];
+                CString h;
+                h.Format("%02X ", b);
+                strncpy(&hex[i * 3], (const char *)h, 3);
+            }
+            hex[96] = '\0';
+            CLogger::Get()->Write(FromBeeb, LogNotice, "DBG rom @%04X: %s", base, hex);
+        }
+    }
+
+    if (teletext)
+    {
+        uint32_t base = (start_addr & 0x0800u) ? 0x7C00u : 0x3C00u;
+
+        /* MOS scrolls Mode 7 by advancing the CRTC start address within the
+         * 1K ring buffer, so the actually-visible top row is offset by
+         * (start_addr & 0x3FF), not byte 0 of the 1K region. */
+        uint32_t top_row = base + (start_addr & 0x03FFu);
+
+        char line[41];
+        for (int i = 0; i < 40; i++)
+        {
+            uint8_t b = m->mem.main_ram[(top_row + (uint32_t)i) & 0x7FFF] & 0x7F;
+            line[i] = (b >= 0x20 && b < 0x7F) ? (char)b : '.';
+        }
+        line[40] = '\0';
+        CLogger::Get()->Write(FromBeeb, LogNotice, "DBG top row @%04X: \"%s\"", top_row, line);
+
+        /* Count how much of the 1K Mode 7 buffer is still the 0xFF fill
+         * value vs. actually written by MOS, to see how much real content exists. */
+        int ff_count = 0;
+        for (int i = 0; i < 1024; i++)
+        {
+            if (m->mem.main_ram[(base + (uint32_t)i) & 0x7FFF] == 0xFF)
+                ff_count++;
+        }
+        CLogger::Get()->Write(FromBeeb, LogNotice, "DBG mode7 buf @%04X: %d/1024 bytes still 0xFF", base, ff_count);
+    }
+}
+
 extern "C" void bbc_debug_log(const char *msg, unsigned val1, unsigned val2)
 {
     CLogger::Get()->Write(FromBeeb, LogNotice, "%s %u, %u", msg, val1, val2);
@@ -53,9 +267,12 @@ int CBeebRunner::DiskReadSector(void *user_ctx,
     (void)drive;
     (void)density;
 
+    s_diskReadCalls++;
+
     bbc_circle_disk_ctx_t *ctx = (bbc_circle_disk_ctx_t *)user_ctx;
     if (!ctx || !ctx->isOpen)
     {
+        s_diskReadFails++;
         *len = 0;
         return -1;
     }
@@ -64,12 +281,14 @@ int CBeebRunner::DiskReadSector(void *user_ctx,
     if (track >= BBC_TRACKS || sector >= BBC_SECTORS_PER_TRACK)
     {
         // Buiten bereik: FDC hoort Record Not Found te krijgen
+        s_diskReadFails++;
         *len = 0;
         return -1;
     }
 
     if (!ctx->is_dsd && side != 0)
     {
+        s_diskReadFails++;
         *len = 0;
         return -1;
     }
@@ -86,6 +305,7 @@ int CBeebRunner::DiskReadSector(void *user_ctx,
 
     if (f_lseek(&ctx->file, offset) != FR_OK)
     {
+        s_diskReadFails++;
         *len = 0;
         return -1;
     }
@@ -94,6 +314,7 @@ int CBeebRunner::DiskReadSector(void *user_ctx,
     FRESULT fr = f_read(&ctx->file, buf, BBC_SECTOR_SIZE, &bytesRead);
     if (fr != FR_OK || bytesRead != BBC_SECTOR_SIZE)
     {
+        s_diskReadFails++;
         *len = 0;
         return -1;
     }
@@ -110,6 +331,8 @@ int CBeebRunner::DiskWriteSector(void *user_ctx,
     (void)drive;
     (void)density;
     (void)deleted;
+
+    s_diskWriteCalls++;
 
     bbc_circle_disk_ctx_t *ctx = (bbc_circle_disk_ctx_t *)user_ctx;
     if (!ctx || !ctx->isOpen || ctx->read_only)
@@ -676,7 +899,11 @@ boolean CBeebRunner::Initialize(void)
     bbc_machine_load_sideways_rom(&m_Machine, dfs1770_rom, dfs_size, 14);
 
     //  MountSDDiskImage();
+#if !BBC_SKIP_DISK_BOOT
     MountDisk("SD:/Welcome.ssd", 0); // later nog met menu'tje..
+#else
+    CLogger::Get()->Write(FromBeeb, LogNotice, "BBC_SKIP_DISK_BOOT actief: geen disk gekoppeld");
+#endif
     bbc_machine_reset(&m_Machine);
 
     boolean bOK = CMultiCoreSupport::Initialize();
@@ -699,6 +926,11 @@ void CBeebRunner::RenderBBCFrame(void)
     const u32 fbPitchWords = m_pFrameBuffer->GetPitch() / 4;
     const u32 fbWidth = m_pFrameBuffer->GetWidth();
     const u32 fbHeight = m_pFrameBuffer->GetHeight();
+
+#if BBC_VIDEO_TEST_PATTERN
+    DrawTestPattern(pFB, fbPitchWords, fbWidth, fbHeight);
+    return;
+#endif
 
     // Bronresolutie van de BBC Micro
     const u32 srcW = BBC_FB_WIDTH;     // 640
@@ -878,7 +1110,22 @@ void CBeebRunner::Run(unsigned nCore)
                     nNextFrameTime = nCurrentTime;
                 }
 
+#if BBC_VIDEO_TEST_PATTERN
+                /* Static pattern: draw once, then leave the framebuffer alone
+                 * so the HDMI scanout never catches a partially-written frame. */
+                static bool s_bTestPatternDrawn = false;
+                if (!s_bTestPatternDrawn)
+                {
+                    m_pFrameBuffer->WaitForVerticalSync();
+                    RenderBBCFrame();
+                    s_bTestPatternDrawn = true;
+                }
+#else
+                /* Single-buffered framebuffer: sync to vblank before writing
+                 * to avoid the HDMI scanout tearing mid-frame. */
+                m_pFrameBuffer->WaitForVerticalSync();
                 RenderBBCFrame();
+#endif
                 // Flash toggle elke 25 frames (~2 Hz) of 50 frames (~1 Hz)
                 static unsigned s_nFrameCounter = 0;
                 if (++s_nFrameCounter >= 25)
@@ -886,6 +1133,17 @@ void CBeebRunner::Run(unsigned nCore)
                     s_nFrameCounter = 0;
                     bbc_video_toggle_flash(&m_Machine.video);
                 }
+
+#if BBC_VIDEO_DEBUG_LOG
+                /* Reroute emulator video/CPU state to the debug log once/sec */
+                static unsigned s_nDebugCounter = 0;
+                if (++s_nDebugCounter >= 50)
+                {
+                    s_nDebugCounter = 0;
+                    DumpEmulatorDebug(&m_Machine);
+                }
+#endif
+
                 nNextFrameTime += FRAME_TIME_US;
             }
 

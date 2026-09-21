@@ -456,8 +456,6 @@ void CKernel::DrawXORRect(int x0, int y0, int x1, int y1)
 	CBcmFrameBuffer *pFB = m_Screen.GetFrameBuffer();
 	if (!pFB)
 		return;
-	x0 /= 2;
-	x1 /= 2;
 	u8 *pRaw = (u8 *)(uintptr_t)pFB->GetBuffer();
 	const unsigned nPitch = pFB->GetPitch();
 	const int fbWidth = (int)m_Screen.GetWidth();

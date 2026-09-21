@@ -56,8 +56,7 @@ int CBeebRunner::DiskReadSector(void *user_ctx,
         return -1;
     }
 
-    // DFS gebruikt strikt sectoren 0 t/m 9 per track (geen 1-based conversies!)
-    if (track >= BBC_TRACKS || sector >= BBC_SECTORS_PER_TRACK)
+    if (track >= BBC_TRACKS)
     {
         // Buiten bereik: FDC hoort Record Not Found te krijgen
         *len = 0;
@@ -72,15 +71,17 @@ int CBeebRunner::DiskReadSector(void *user_ctx,
 
     FSIZE_t offset;
     if (ctx->is_dsd)
-    {
         offset = ((track * 2 + (side & 1)) * BBC_SECTORS_PER_TRACK + sector) * BBC_SECTOR_SIZE;
-    }
     else
-    {
         offset = ((track * BBC_SECTORS_PER_TRACK) + sector) * BBC_SECTOR_SIZE;
-    }
 
     if (f_lseek(&ctx->file, offset) != FR_OK)
+    {
+        *len = 0;
+        return -1;
+    }
+
+    if (offset + BBC_SECTOR_SIZE > f_size(&ctx->file))
     {
         *len = 0;
         return -1;
@@ -92,6 +93,15 @@ int CBeebRunner::DiskReadSector(void *user_ctx,
     {
         *len = 0;
         return -1;
+    }
+
+    static unsigned read_trace_count = 0;
+    if (read_trace_count < 16)
+    {
+        CLogger::Get()->Write(FromDisk, LogNotice,
+                              "Read trk=%u sec=%u side=%u bytes=%u head=%02X%02X",
+                              track, sector, side, bytesRead, buf[0], buf[1]);
+        read_trace_count++;
     }
 
     *len = BBC_SECTOR_SIZE;
@@ -111,15 +121,8 @@ int CBeebRunner::DiskWriteSector(void *user_ctx,
     if (!ctx || !ctx->isOpen || ctx->read_only)
         return -1;
 
-    // Normaliseer sector: DFS kan 0..9 of 1..10 doorgeven
-    uint8_t sec_idx = sector;
-    if (sec_idx >= BBC_SECTORS_PER_TRACK)
-    {
-        sec_idx -= 1; // 10 -> 9 (bij 1-based adressering)
-    }
-
     // Als de FDC voorbij het einde van het spoor probeert te schrijven (bijv. sector 11+)
-    if (track >= BBC_TRACKS || sec_idx >= BBC_SECTORS_PER_TRACK)
+    if (track >= BBC_TRACKS)
     {
         return -1;
     }
@@ -132,13 +135,12 @@ int CBeebRunner::DiskWriteSector(void *user_ctx,
 
     FSIZE_t offset;
     if (ctx->is_dsd)
-    {
-        offset = ((track * 2 + (side & 1)) * BBC_SECTORS_PER_TRACK + sec_idx) * BBC_SECTOR_SIZE;
-    }
+        offset = ((track * 2 + (side & 1)) * BBC_SECTORS_PER_TRACK + sector) * BBC_SECTOR_SIZE;
     else
-    {
-        offset = ((track * BBC_SECTORS_PER_TRACK) + sec_idx) * BBC_SECTOR_SIZE;
-    }
+        offset = ((track * BBC_SECTORS_PER_TRACK) + sector) * BBC_SECTOR_SIZE;
+
+    if (offset + BBC_SECTOR_SIZE > f_size(&ctx->file))
+        return -1;
 
     if (f_lseek(&ctx->file, offset) != FR_OK)
     {
@@ -156,8 +158,8 @@ int CBeebRunner::DiskWriteSector(void *user_ctx,
 
     f_sync(&ctx->file);
 
-    CLogger::Get()->Write(FromDisk, LogNotice, "Disk Write OK: Trk=%u Sec=%u (norm=%u, Offset 0x%05X)",
-                          track, sector, sec_idx, (unsigned)offset);
+    CLogger::Get()->Write(FromDisk, LogNotice, "Disk Write OK: Trk=%u Sec=%u (Offset 0x%05X)",
+                          track, sector, (unsigned)offset);
 
     return 0;
 }
@@ -874,6 +876,7 @@ void CBeebRunner::Run(unsigned nCore)
                     nNextFrameTime = nCurrentTime;
                 }
 
+                m_pFrameBuffer->WaitForVerticalSync();
                 RenderBBCFrame();
                 // Flash toggle elke 25 frames (~2 Hz) of 50 frames (~1 Hz)
                 static unsigned s_nFrameCounter = 0;

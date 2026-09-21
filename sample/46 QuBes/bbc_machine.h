@@ -65,6 +65,21 @@ typedef struct bbc_machine {
     uint32_t        io_cycles_pending;
     uint32_t        io_accesses;
     VrEmu6502      *cpu;
+
+    // Debug: last write into the Mode 7 screen memory region (0x7C00-0x7FFF)
+    uint16_t        dbg_mode7_last_addr;
+    uint8_t         dbg_mode7_last_val;
+    uint16_t        dbg_mode7_last_pc;
+    uint8_t         dbg_mode7_last_x;
+    uint8_t         dbg_mode7_last_y;
+    uint32_t        dbg_mode7_write_count;
+    uint8_t         dbg_mode7_zp_d8;
+    uint8_t         dbg_mode7_zp_d9;
+    uint8_t         dbg_mode7_zp_f0;
+    uint8_t         dbg_mode7_zp_88;
+    uint8_t         dbg_mode7_zp_de;
+    uint8_t         dbg_mode7_zp_df;
+    uint32_t        dbg_irq_count;
 } bbc_machine_t;
 
 // Machine API voor beeb.cpp

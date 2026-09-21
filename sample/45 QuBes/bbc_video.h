@@ -69,6 +69,7 @@ extern "C"
         /* System RAM pointer (owned by bbc_memory, not by this struct) */
         const uint8_t *system_ram;
         uint32_t ram_size;
+        uint32_t screen_base;
 
         /* Output configuration */
         bbc_video_output_t output;
@@ -111,6 +112,8 @@ extern "C"
 
     /* CPU bus access — Video ULA (&FE20-&FE21) */
     void bbc_video_vidproc_write(bbc_video_t *video, uint8_t addr, uint8_t data);
+
+    void bbc_video_set_screen_base(bbc_video_t *video, uint32_t base);
 
     /* Tick — advance one CRTC clock cycle. */
     void bbc_video_tick(bbc_video_t *video);

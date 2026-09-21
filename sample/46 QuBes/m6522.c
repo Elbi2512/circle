@@ -140,8 +140,8 @@ static void tick_t1(m6522_t *via)
     if (PIP_TEST(t->pip, PIP_COUNT_OFFSET, 0))
         t->counter--;
 
-    /* underflow detection: counter wraps through 0xFFFF */
-    t->t_out = (t->counter == 0xFFFF);
+    /* BeebEm models the VIA timers in 2 MHz cycles and fires below zero. */
+    t->t_out = (t->counter < 0);
     if (t->t_out) {
         if (via->acr & M6522_ACR_T1_CONTINUOUS) {
             t->t_bit = !t->t_bit;
@@ -152,13 +152,9 @@ static void tick_t1(m6522_t *via)
                 t->t_bit = true;
             }
         }
-        /* T1 always reloads from latch */
-        PIP_SET(t->pip, PIP_LOAD_OFFSET, 1);
+        /* T1 reloads from its 1 MHz latch in 2 MHz clock units. */
+        t->counter += ((int32_t)t->latch * 2) + 4;
     }
-
-    /* reload from latch */
-    if (PIP_TEST(t->pip, PIP_LOAD_OFFSET, 0))
-        t->counter = t->latch;
 }
 
 static void tick_t2(m6522_t *via, bool pb6_edge)
@@ -173,7 +169,7 @@ static void tick_t2(m6522_t *via, bool pb6_edge)
         t->counter--;
     }
 
-    t->t_out = (t->counter == 0xFFFF);
+    t->t_out = (t->counter < 0);
     if (t->t_out) {
         if (!t->t_bit) {
             set_ifr(via, M6522_IRQ_T2);
@@ -257,6 +253,7 @@ static uint8_t reg_read(m6522_t *via, uint8_t addr)
             clear_pa_intr(via);
             if (M6522_PCR_CA2_AUTO_HS(via) || M6522_PCR_CA2_PULSE_OUTPUT(via))
                 via->pa.c2_out = false;
+            via->dbg_ora_reads++;
 #ifdef VIA_TRACE_ORA
             fprintf(stderr, "[ORA_read] outr=%02X ddr=%02X inpr=%02X data=%02X IFR=%02X IER=%02X\n",
                     via->pa.outr, via->pa.ddr, via->pa.inpr, data, via->ifr, via->ier);
@@ -273,12 +270,13 @@ static uint8_t reg_read(m6522_t *via, uint8_t addr)
             break;
 
         case M6522_REG_T1CL:
-            data = via->t1.counter & 0xFF;
+            data = via->t1.counter < 0 ? 0xFF : (uint8_t)((via->t1.counter / 2) & 0xFF);
             clear_ifr(via, M6522_IRQ_T1);
+            via->dbg_t1cl_reads++;
             break;
 
         case M6522_REG_T1CH:
-            data = via->t1.counter >> 8;
+            data = via->t1.counter < 0 ? 0xFF : (uint8_t)((via->t1.counter >> 9) & 0xFF);
             break;
 
         case M6522_REG_T1LL:
@@ -290,12 +288,12 @@ static uint8_t reg_read(m6522_t *via, uint8_t addr)
             break;
 
         case M6522_REG_T2CL:
-            data = via->t2.counter & 0xFF;
+            data = via->t2.counter < 0 ? 0xFF : (uint8_t)((via->t2.counter / 2) & 0xFF);
             clear_ifr(via, M6522_IRQ_T2);
             break;
 
         case M6522_REG_T2CH:
-            data = via->t2.counter >> 8;
+            data = via->t2.counter < 0 ? 0xFF : (uint8_t)((via->t2.counter >> 9) & 0xFF);
             break;
 
         case M6522_REG_SR:
@@ -379,7 +377,7 @@ static void reg_write(m6522_t *via, uint8_t addr, uint8_t data)
 
         case M6522_REG_T1CH:
             via->t1.latch   = (via->t1.latch & 0x00FF) | ((uint16_t)data << 8);
-            via->t1.counter = via->t1.latch;
+            via->t1.counter = ((int32_t)via->t1.latch * 2) + 1;
             /* In PB7 mode t_bit drives PB7 output and must NOT be reset on
              * re-arm — PB7 only changes on underflow.  Outside PB7 mode the
              * bit is an internal one-shot guard; reset it so one-shot fires. */
@@ -402,7 +400,7 @@ static void reg_write(m6522_t *via, uint8_t addr, uint8_t data)
 
         case M6522_REG_T2CH:
             via->t2.latch   = (via->t2.latch & 0x00FF) | ((uint16_t)data << 8);
-            via->t2.counter = via->t2.latch;
+            via->t2.counter = ((int32_t)via->t2.latch * 2) + 1;
             via->t2.t_bit   = false;
             clear_ifr(via, M6522_IRQ_T2);
             PIP_RESET(via->t2.pip, PIP_COUNT_OFFSET);
@@ -423,6 +421,7 @@ static void reg_write(m6522_t *via, uint8_t addr, uint8_t data)
 
         case M6522_REG_PCR:
             via->pcr = data;
+            via->dbg_pcr_writes++;
             if (M6522_PCR_CA2_FIX_OUTPUT(via)) {
                 bool lvl = M6522_PCR_CA2_OUTPUT_LEVEL(via);
                 via->pa.c2_out = lvl;
@@ -442,6 +441,7 @@ static void reg_write(m6522_t *via, uint8_t addr, uint8_t data)
             if (data & M6522_IRQ_ANY)
                 data = 0x7F;
             clear_ifr(via, data);
+            via->dbg_ifr_writes++;
             break;
 
         case M6522_REG_IER:
@@ -485,10 +485,10 @@ void m6522_init(m6522_t *via, const m6522_callbacks_t *callbacks)
 
 void m6522_reset(m6522_t *via)
 {
-    /* "RESET clears all internal registers to logic 0, except T1, T2, SR" */
-    via->pa.outr  = 0;
+    /* BeebEm/VIAReset defaults the port registers high and timers inactive. */
+    via->pa.outr  = 0xFF;
     via->pa.ddr   = 0;
-    via->pb.outr  = 0;
+    via->pb.outr  = 0xFF;
     via->pb.ddr   = 0;
     via->pa.c1_triggered = false;
     via->pa.c2_triggered = false;
@@ -505,9 +505,11 @@ void m6522_reset(m6522_t *via)
     via->irq_out  = false;
     via->irq_pip  = 0;
     via->t1.pip   = 0;
+    via->t1.counter = 0xFFFF;
     via->t1.t_bit = false;
     via->t1.t_out = false;
     via->t2.pip   = 0;
+    via->t2.counter = 0xFFFF;
     via->t2.t_bit = false;
     via->t2.t_out = false;
     VIA_LOGD("reset");

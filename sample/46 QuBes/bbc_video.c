@@ -27,6 +27,10 @@ static uint8_t s_current_scanline[BBC_INTERNAL_W];
 static int s_raster_y = 0;
 static int s_vis_col = 0;
 
+/* Teletext Set-After state persists across all 40 columns of a scanline;
+ * it is re-primed once per scanline (col == 0), not per character. */
+static saa5050_line_state_t s_mode7_ls;
+
 static inline uint32_t bbc_bitmap_ram_addr(uint16_t ma, uint8_t ra, uint32_t screen_base)
 {
     /*
@@ -61,6 +65,7 @@ static void _vsync_cb(void *ctx, bool state)
     {
         /* VSYNC rising edge: reset raster scanline teller voor nieuw frame */
         s_raster_y = -1; /* -1 betekent: wacht tot het actieve beeld (v_de) begint */
+        saa5050_reset_frame(&video->teletext);
     }
 
     if (video->vsync_cb)
@@ -96,6 +101,7 @@ void bbc_video_reset(bbc_video_t *video)
     memset(s_bbc_screen, 0, sizeof(s_bbc_screen));
     memset(s_mode7_screen, 0, sizeof(s_mode7_screen));
     memset(s_current_scanline, 0, sizeof(s_current_scanline));
+    memset(&s_mode7_ls, 0, sizeof(s_mode7_ls));
 
     mc6845_reset(&video->crtc);
     bbc_video_ula_reset(&video->ula);
@@ -150,6 +156,7 @@ void bbc_video_tick(bbc_video_t *video)
 {
     const mc6845_t *crtc = &video->crtc;
     uint8_t old_h_ctr = crtc->h_ctr;
+    uint8_t old_r_ctr = crtc->r_ctr;
 
     mc6845_output_t out = mc6845_tick(&video->crtc);
 
@@ -175,6 +182,14 @@ void bbc_video_tick(bbc_video_t *video)
     /* Einde scanline */
     if (old_h_ctr == crtc->h_total)
     {
+        /* Nieuwe character-rij begonnen (r_ctr terug naar 0): latch/reset
+         * de double-height state (\x0D is Set-After per rij, niet per scanline). */
+        if (video->ula.teletext_mode && crtc->r_ctr == 0 && old_r_ctr != 0)
+        {
+            saa5050_end_row(&video->teletext);
+            saa5050_start_row(&video->teletext, (uint8_t)crtc->v_ctr);
+        }
+
         if (video->ula.teletext_mode)
         {
             if (raster_y_mode7 >= 0 && raster_y_mode7 < BBC_MODE7_H)
@@ -208,15 +223,19 @@ void bbc_video_tick(bbc_video_t *video)
         if (scan_line > 9)
             scan_line = 9;
 
+        if (col == 0)
+        {
+            /* saa5050_render_char() halves this itself (0-19 -> 0-9 line_addr),
+             * so prime with the raw CRTC scanline, not the pre-halved buffer row. */
+            saa5050_start_scanline(&video->teletext, &s_mode7_ls, (uint8_t)(out.ra & 0x1F));
+        }
+
         if (ram_addr < video->ram_size && col < 40)
         {
             uint8_t code = video->system_ram[ram_addr] & 0x7F;
-            saa5050_line_state_t ls;
-
-            saa5050_start_scanline(&video->teletext, &ls, (uint8_t)scan_line);
 
             uint8_t pixels[SAA5050_PIXELS_PER_CHAR];
-            saa5050_render_char(&video->teletext, &ls, code, pixels);
+            saa5050_render_char(&video->teletext, &s_mode7_ls, code, pixels);
 
             const int CHAR_WIDTH = 6;
             int base_x = col * CHAR_WIDTH;

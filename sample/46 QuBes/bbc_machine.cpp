@@ -7,8 +7,11 @@ extern void    bbc_mem_write(bbc_machine_t *m, uint16_t addr, uint8_t val);
 
 static void update_via_irq(bbc_machine_t *m)
 {
+    bool was = m->irq_pending;
     m->irq_pending = m6522_get_irq(&m->sysvia.via) ||
                      m6522_get_irq(&m->uservia.via);
+    if (m->irq_pending && !was)
+        m->dbg_irq_count++;
 }
 
 static void sv_sound_write(void *ctx, uint8_t data)
@@ -19,8 +22,11 @@ static void sv_sound_write(void *ctx, uint8_t data)
 
 static bool sv_keyboard_read(void *ctx, uint8_t row, uint8_t col)
 {
+    /* Caller (VIA autoscan) passes hardware axes: row=0-7, col=0-9.
+     * bbc_machine_key_event stores the opposite way (index=0-9 "row", bit=0-7
+     * "col"), so the array index/bit must be swapped here to match. */
     bbc_machine_t *m = (bbc_machine_t *)ctx;
-    return row < 16 && col < 8 && (m->keyboard_matrix[row] & (1u << col));
+    return col < 16 && row < 8 && (m->keyboard_matrix[col] & (1u << row));
 }
 
 static void sv_latch_changed(void *ctx, uint8_t latch_bits)
@@ -117,6 +123,7 @@ void bbc_machine_init(bbc_machine_t *m, const uint8_t *os_rom, uint32_t os_size,
                       const uint8_t *basic_rom, uint32_t basic_size)
 {
     memset(m, 0, sizeof(bbc_machine_t));
+    memset(m->mem.sideways_banks, 0xFF, sizeof(m->mem.sideways_banks));
 
     bbc_sysvia_callbacks_t sysvia_callbacks = {
         sv_sound_write, sv_keyboard_read, sv_latch_changed,

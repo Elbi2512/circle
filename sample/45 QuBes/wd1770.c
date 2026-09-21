@@ -33,7 +33,6 @@ extern void bbc_debug_log(const char *msg, unsigned val1, unsigned val2);
 /* INDEX pulse timing */
 #define INDEX_PERIOD_CYCLES 400000
 #define INDEX_PULSE_CYCLES 4000
-
 /* -------------------------------------------------------------------------
  * Internal helpers
  * ------------------------------------------------------------------------- */
@@ -114,6 +113,7 @@ static void seek_done(wd1770_t *fdc, uint8_t cmd)
     if (fdc->cb.seek)
         fdc->cb.seek(fdc->cb.user_ctx, fdc->cur_drive, fdc->track);
     completed(fdc);
+    fdc->seek_ok = false;
 }
 
 /* -------------------------------------------------------------------------
@@ -144,10 +144,10 @@ static void begin_read_sector(wd1770_t *fdc)
         return;
     }
 
-    /* Eerste byte klaarzetten en DRQ triggeren */
-    fdc->data = fdc->buf[fdc->buf_pos++];
+    /* Present byte zero; advance only when the CPU reads the data register. */
+    fdc->data = fdc->buf[0];
     set_drq(fdc, true);
-    fdc->delay_cycles = 0; // GEEN automatische completion timer starten!
+    fdc->delay_cycles = 0; // CPU-driven completion polling
 }
 
 static void begin_write_sector(wd1770_t *fdc)
@@ -210,7 +210,6 @@ static void cmd_start(wd1770_t *fdc)
 
     case 0x1: /* Seek */
         fdc->type1_status = true;
-        fdc->seek_ok = false;
         fdc->delay_cycles = DELAY_SEEK_ALLOW;
         break;
 
@@ -235,11 +234,8 @@ static void cmd_start(wd1770_t *fdc)
     case 0x7: /* Step out (with update) */
         fdc->step_dir = -1;
         fdc->type1_status = true;
-        if (cmd & 0x10)
-        {
-            if (fdc->track > 0)
-                fdc->track--;
-        }
+        if (cmd & 0x10 && fdc->track > 0)
+            fdc->track--;
         fdc->delay_cycles = DELAY_SEEK_STEP;
         break;
 
@@ -469,17 +465,28 @@ uint8_t wd1770_read(wd1770_t *fdc, uint8_t reg)
         WD_LOGD("read sector -> %02X", fdc->sector);
         return fdc->sector;
     case 3: { /* Data register – reading clears DRQ */
-        set_drq(fdc, false);
         uint8_t d = fdc->data;
 
-        if (fdc->buf_pos < fdc->buf_count) {
-            /* Volgende byte klaarzetten met floppy timing delay (128 cycli) */
-            fdc->data = fdc->buf[fdc->buf_pos++];
-            fdc->delay_cycles = 128; 
+        /* A late read after the final byte or after completion must not restart
+         * the read-sector command or reschedule completion. */
+        if (!fdc->drq || !(fdc->status & WD1770_STATUS_BUSY) || fdc->type1_status ||
+            fdc->buf_pos >= fdc->buf_count)
+        {
+            if (fdc->buf_pos >= fdc->buf_count && (fdc->status & WD1770_STATUS_BUSY))
+                set_drq(fdc, false);
+            return d;
+        }
+
+        set_drq(fdc, false);
+
+        if ((uint16_t)(fdc->buf_pos + 1) < fdc->buf_count) {
+            fdc->buf_pos++;
+            fdc->data = fdc->buf[fdc->buf_pos];
+            fdc->delay_cycles = 128;
         } else {
-            /* Laatste byte (256): niet direct INTRQ vuren binnen de LDA instructie,
-             * maar geef de 6502 64 cycli de tijd voor zijn PLA en RTI! */
-            fdc->delay_cycles = DELAY_COMPLETE; // 100 cycli wachten vóór completed()
+            fdc->buf_pos = fdc->buf_count;
+            if (fdc->delay_cycles <= 0)
+                fdc->delay_cycles = DELAY_COMPLETE;
         }
         return d;
     }
@@ -584,6 +591,13 @@ void wd1770_tick(wd1770_t *fdc, int32_t cycles)
         if (fdc->buf_pos < fdc->buf_count)
         {
             set_drq(fdc, true);
+        }
+        else if ((fdc->command >> 4) == 0x9 ||
+                 (fdc->command >> 4) == 0xB)
+        {
+            /* Multiple-sector commands need their inter-sector phase before
+             * the next sector is fetched. */
+            cmd_next(fdc);
         }
         else
         {
