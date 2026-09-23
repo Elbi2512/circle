@@ -158,8 +158,9 @@ int CBeebRunner::DiskWriteSector(void *user_ctx,
 
     f_sync(&ctx->file);
 
-    CLogger::Get()->Write(FromDisk, LogNotice, "Disk Write OK: Trk=%u Sec=%u (Offset 0x%05X)",
-                          track, sector, (unsigned)offset);
+    CLogger::Get()->Write(FromDisk, LogNotice,
+                          "Disk Write OK: Trk=%u Sec=%u head=%02X%02X tail=%02X%02X (Offset 0x%05X)",
+                          track, sector, buf[0], buf[1], buf[254], buf[255], (unsigned)offset);
 
     return 0;
 }

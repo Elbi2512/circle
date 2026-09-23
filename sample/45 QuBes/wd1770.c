@@ -174,7 +174,7 @@ static void begin_write_sector(wd1770_t *fdc)
     fdc->delay_cycles = DELAY_COMPLETE;
 }
 
-static void finish_write_sector(wd1770_t *fdc)
+static void finish_write_sector(wd1770_t *fdc, bool complete_command)
 {
     bool deleted = (fdc->command & 0x01) != 0;
     int rc = fdc->cb.write_sector(fdc->cb.user_ctx,
@@ -183,8 +183,18 @@ static void finish_write_sector(wd1770_t *fdc)
                                   fdc->buf, fdc->buf_pos);
     if (rc != 0)
         fault(fdc, WD1770_STATUS_RNF, "write sector failed");
-    else
+    else if (complete_command)
+    {
+        bbc_debug_log("FDC WRITE complete sector/bytes", fdc->sector, fdc->buf_pos);
         completed(fdc);
+    }
+    else
+    {
+        set_drq(fdc, false);
+        fdc->buf_pos = 0;
+        fdc->buf_count = 0;
+        fdc->delay_cycles = 0;
+    }
 }
 
 /* -------------------------------------------------------------------------
@@ -349,7 +359,7 @@ static void cmd_next(wd1770_t *fdc)
         break;
 
     case 0xA: /* Write single sector complete */
-        finish_write_sector(fdc);
+        finish_write_sector(fdc, true);
         break;
 
     case 0xB: /* Write multiple sectors */
@@ -357,11 +367,11 @@ static void cmd_next(wd1770_t *fdc)
                            WD1770_STATUS_RNF |
                            WD1770_STATUS_CRC_ERROR))
         {
-            finish_write_sector(fdc);
+            finish_write_sector(fdc, true);
         }
         else if (fdc->in_gap)
         {
-            finish_write_sector(fdc);
+            finish_write_sector(fdc, false);
             fdc->sector++;
             fdc->in_gap = false;
             begin_write_sector(fdc);
@@ -550,6 +560,8 @@ void wd1770_write(wd1770_t *fdc, uint8_t reg, uint8_t val)
                 fdc->buf[fdc->buf_pos++] = val;
             if (fdc->buf_pos < fdc->buf_count)
                 set_drq(fdc, true);
+            else
+                fdc->delay_cycles = DELAY_COMPLETE;
         }
         WD_LOGD("write data %02X", val);
         break;
@@ -598,6 +610,12 @@ void wd1770_tick(wd1770_t *fdc, int32_t cycles)
             /* Multiple-sector commands need their inter-sector phase before
              * the next sector is fetched. */
             cmd_next(fdc);
+        }
+        else if ((fdc->command >> 4) == 0xA)
+        {
+            /* A completed write buffer must be committed through the disk
+             * callback before the controller raises INTRQ. */
+            finish_write_sector(fdc, true);
         }
         else
         {

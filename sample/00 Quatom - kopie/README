@@ -1,0 +1,77 @@
+This is my take on running an Acorn Atom emulator. The code is a decomposition of Tom Walker’s version, adapted for effective usage on a 64 bit multi core Raspberry Pi Zero 2W.
+
+On the HDMI output, four Atoms run simultaneously, each with its own screen area. You can select a core with F1–F4.
+Full‑screen mode for a core is available via F5–F8.
+Keep in mind that these keys mainly switch the attached keyboard to the selected core.
+F12 resets the currently selected core.
+
+By default, the Atom runs at the original Atom speed (1 MHz) and uses about 17% of a core.
+F11 enables “Turbo Mode”, speeding the Atom up to an impressive 5 MHz.
+Even then, VSync remains at 50 Hz, so keyboard handling stays civilized and does not generate multiple keystrokes per press.
+
+Each core has an MMC‑based file system. Technically, core 0 handles the file system, display, and keyboard input.
+Since the cores share several 256‑byte memory pages, I adopted the BBC naming convention (Jim, Fred, Sheila) and dedicated the pages to people who were key contributors to the Acorn Atom or this emulator:
+Gerard Borghaerts (Gera), Roland Leurs (Rola), Kees van Oss (Kevo), and Tom Walker (Towa).
+
+Page 04 = Gera
+Page 05 = Rola
+Page 06 = Kevo
+Page 07 = Towa
+
+Gera can read and write in the GERA page, but only read from Rola, Kevo, and Towa.
+The same logic applies to the other pages.
+
+The PS/2 keyboard is handled exactly like a real PS/2 keyboard, but cleverly mapped to the Atom key matrix.
+For example, the @ symbol is translated to the correct Atom key combination.
+TAB acts as COPY, and the key above TAB produces CTRL‑L, which is handy for clearing the screen.
+
+On the right side of the display, you can see the load of each core and a virtual printer window.
+If you enable the printer function (CTRL‑B / CTRL‑C), output is shown there and scrolls like a classic paper‑fed calculator.
+You can toggle this per core using PRINT SCREEN or SHIFT‑PRINT SCREEN.
+For debugging the Atom, there is a #define debug option, which is disabled by default.
+
+There are many more tricks, such as shared RAM between cores and a time function.
+This is only the beginning of a new journey.
+
+Examples:
+PRINT ?#bfe1 → prints the core that processed the request
+#bfe2 → index to the time (since startup or NTP sync via WiFi).
+Writing index 1–11 and reading the value returns:
+
+Code
+0: Status / number of available registers
+1: dayOfWeek
+2: dayOfMonth
+3: monthNum
+4: year % 100
+5: hour
+6: minute
+7: second
+8: (ms * 255) / 1000
+
+?#bfe3 = 0 → switch off WiFi usage (removes the cfg file from the SD card)
+?#bfe3 = != → copies a master cfg file with WiFi credentials to a valid name
+?#bfe4: 0 wifi succesfully attached to the router, !=0 if not
+
+A hard reset of the Pi Zero is required to activate this.
+
+On the SD card there is a binary file containing the animated MP5 Atom: a 168‑frame combined 256×142 32‑bit BMP animation.
+
+Big thanks to the makers and designers of:
+
+- Raspberry Pi Zero 2W
+- The clever Circle framework
+- Roland, for his bright ideas
+- Acorn Ltd., responsible for my career in IT by creating the Atom
+
+In the SD content map, there is a baseline with all the Atom files. Mind that there is development Kernel running after boot (the rainbow screen) which enables to upload the Atom Kernel during development. Of course the Atom Kernel file can be copied on the SD card. Then put the card in in the Zero, boot it up and Bob is your uncle.
+For uploading and debugging, use serial cable: GND- > GND, TX -> RX, RX -> TX. Use 3,3 V levels!
+
+Change log:
+
+0.9 – First beta version for in‑depth testing
+0.91 – Colour mode fixed (was monochrome); debugger option via #define to shrink code
+0.92 – Fixed scale‑up for modes 3, 7, and 11; fixed screen cleanup after F9 full‑screen centered, back to windowed mode
+       added: check if connected to the actual network and reflect status on #BFE4
+0.93 - bugfix (11) findings
+0.94 - bugfix, due to double check if I forgot some minor adjustments (And I did...) 

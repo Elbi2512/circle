@@ -1,0 +1,6 @@
+country=NL
+
+network={
+	ssid="Kelderlamp"
+	psk="4308040341"
+}

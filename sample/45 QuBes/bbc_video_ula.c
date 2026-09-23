@@ -65,32 +65,16 @@ static const bbc_rgb_t s_colour_table[8] = {
  * -------------------------------------------------------------------------- */
 void bbc_video_ula_rebuild_tables(bbc_video_ula_t *ula)
 {
-    /*
-     * 1bpp (MODE 0, 3, 4, 6): 8 pixels per byte.
-     * Pixel i uses bit (7-i) of the byte.
-     * logical colour = that single bit → palette[bit].
-     */
+    /* 1bpp (MODE 0, 3, 4, 6): the pixel selects logical colour 0 or 1. */
     for (int byte = 0; byte < 256; byte++) {
         for (int px = 0; px < 8; px++) {
             uint8_t bit = (byte >> (7 - px)) & 1;
-            ula->lut_1bpp[byte][px] = ula->palette[bit];
+            uint8_t logical = bit;
+            ula->lut_1bpp[byte][px] = ula->palette[logical];
         }
     }
 
-    /*
-     * 2bpp (MODE 1, 5): 4 pixels per byte.
-     * Each pixel uses two bits: the high bit from the upper nibble positions,
-     * the low bit from the lower nibble positions.
-     *
-     * BBC bit ordering:
-     *   Pixel 0: {bit7, bit3}
-     *   Pixel 1: {bit6, bit2}
-     *   Pixel 2: {bit5, bit1}
-     *   Pixel 3: {bit4, bit0}
-     *
-     * This is an interleaved layout — the two bits of each pixel are 4
-     * positions apart. logical colour = 0-3.
-     */
+    /* 2bpp (MODE 1, 5): interleaved high and low pixel bits. */
     for (int byte = 0; byte < 256; byte++) {
         for (int px = 0; px < 4; px++) {
             uint8_t high = (byte >> (7 - px)) & 1;  /* bits 7,6,5,4 */
@@ -100,17 +84,7 @@ void bbc_video_ula_rebuild_tables(bbc_video_ula_t *ula)
         }
     }
 
-    /*
-     * 4bpp (MODE 2): 2 pixels per byte.
-     * Each pixel uses 4 bits: positions {7,5,3,1} for pixel 0
-     *                        and {6,4,2,0} for pixel 1.
-     *
-     * BBC bit ordering (from B-em table4bpp initialisation):
-     *   Pixel 0: {bit7, bit5, bit3, bit1}  (even-offset bits)
-     *   Pixel 1: {bit6, bit4, bit2, bit0}  (odd-offset bits)
-     *
-     * logical colour = 0-15.
-     */
+    /* 4bpp (MODE 2): Stuurt alle 4 de lijnen aan (bit3, bit2, bit1, bit0) */
     for (int byte = 0; byte < 256; byte++) {
         for (int px = 0; px < 2; px++) {
             uint8_t b3 = (byte >> (7 - px)) & 1;
@@ -122,7 +96,6 @@ void bbc_video_ula_rebuild_tables(bbc_video_ula_t *ula)
         }
     }
 }
-
 /* --------------------------------------------------------------------------
  * Public API
  * -------------------------------------------------------------------------- */

@@ -24,6 +24,10 @@ static int s_fdc_trace_count = 0;
 static unsigned s_fdc_trace_commands = 0;
 static unsigned s_fdc_trace_bytes = 0;
 static unsigned s_fdc_nmi_trace = 0;
+static unsigned s_fdc_write_trace = 0;
+static unsigned s_fdc_write_irq_trace = 0;
+static unsigned s_fdc_write_status_trace = 0;
+static unsigned s_fdc_write_cpu_trace = 0;
 
 /* uservia callbacks */
 static void uv_port_out(void *ctx, uint8_t port, uint8_t val, uint8_t ddr);
@@ -420,6 +424,10 @@ static void io_vidproc_write(uint16_t addr, uint8_t val, void *ctx)
 {
     bbc_machine_t *m = (bbc_machine_t *)ctx;
     bbc_video_vidproc_write(&m->video, (uint8_t)(addr & 1), val);
+    if (!(addr & 1)) {
+        bbc_video_debug_trace_mode();
+      // bbc_debug_log("ULA FE20 write: val, 2mhz =", val, m->video.ula.crtc_2mhz);
+    }
 }
 
 static uint8_t io_sysvia_read(uint16_t addr, void *ctx)
@@ -511,6 +519,12 @@ static void fdc_irq(void *ctx, bool state)
 
     if (state)
     {
+        if ((m->fdc.command & 0xE0) == 0xA0 && s_fdc_write_irq_trace < 8)
+        {
+            bbc_debug_log("FDC WRITE INTRQ pc/sector", (unsigned)bbc_cpu_get_pc(m->cpu),
+                          ((unsigned)m->fdc.command << 8) | m->fdc.sector);
+            s_fdc_write_irq_trace++;
+        }
         if (s_fdc_nmi_trace < 32)
         {
             bbc_debug_log("FDC INTRQ NMI pc", (unsigned)bbc_cpu_get_pc(m->cpu),
@@ -555,6 +569,11 @@ static uint8_t io_fdc_read(uint16_t addr, void *ctx)
     if (reg == 0) // &FE84: Acorn 1770 Status / DRQ Latch
     {
         uint8_t raw = wd1770_read(&m->fdc, 0);
+        if ((m->fdc.command & 0xE0) == 0xA0 && s_fdc_write_status_trace < 16)
+        {
+            bbc_debug_log("FDC WRITE status/pc", (unsigned)bbc_cpu_get_pc(m->cpu), raw);
+            s_fdc_write_status_trace++;
+        }
         if (s_fdc_trace_commands <= 20 && !(raw & WD1770_STATUS_BUSY))
             bbc_debug_log("FDC TRACE idle status/bytes", raw, s_fdc_trace_bytes);
 
@@ -642,6 +661,16 @@ static void io_fdc_write(uint16_t addr, uint8_t val, void *ctx)
     }
     else if (reg == 3) // &FE87: Data register
     {
+        if ((m->fdc.command & 0xE0) == 0xA0 && s_fdc_write_cpu_trace < 8)
+        {
+            bbc_debug_log("FDC WRITE byte/pos/cmd", m->fdc.buf_pos,
+                          ((unsigned)m->fdc.command << 8) | val);
+            bbc_debug_log("FDC WRITE cpu/axy", (unsigned)bbc_cpu_get_pc(m->cpu),
+                          ((unsigned)bbc_cpu_get_a(m->cpu) << 16) |
+                          ((unsigned)bbc_cpu_get_x(m->cpu) << 8) |
+                          bbc_cpu_get_y(m->cpu));
+            s_fdc_write_cpu_trace++;
+        }
         m->fdc_drq_state = false;
         wd1770_write(&m->fdc, 3, val);
     }

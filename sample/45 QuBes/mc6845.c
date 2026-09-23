@@ -116,12 +116,40 @@ uint8_t mc6845_read(mc6845_t *c, uint8_t addr)
 
 mc6845_output_t mc6845_tick(mc6845_t *c)
 {
+    /* 1. Stel de output samen voor de HUIDIGE klokcyclus */
+    mc6845_output_t out;
+    out.ma = c->ma & 0x3FFF;
+    out.ra = c->r_ctr & 0x1F;
+    out.display_enable = c->h_de && c->v_de;
+    out.hsync = c->hs;
+    out.vsync = c->vs;
+
+    /* Cursor evaluatie op huidige positie */
+    c->cursor_on = false;
+    uint16_t cursor_addr = mc6845_get_cursor_addr(c);
+    if (out.display_enable && c->ma == cursor_addr)
+    {
+        if (c->r_ctr == 0)
+            c->cursor_line_ff = false;
+        if (c->r_ctr == (c->cursor_start & 0x1F))
+            c->cursor_line_ff = true;
+
+        uint8_t cursor_mode = (c->cursor_start >> 5) & 0x03;
+        bool cursor_visible = (cursor_mode == 0) ||
+                              (cursor_mode >= 2 && c->cursor_blink_state);
+        c->cursor_on = c->cursor_line_ff && cursor_visible;
+
+        if (c->r_ctr == (c->cursor_end & 0x1F))
+            c->cursor_line_ff = false;
+    }
+    out.cursor = c->cursor_on;
+
+    /* 2. Werk de tellers bij voor de VOLGENDE cyclus (klok-overgang) */
     if (c->h_ctr == c->h_total)
     {
         c->h_ctr = 0;
 
         uint8_t max_scan = (!c->in_vadj) ? c->max_scanline_addr : ((c->v_total_adjust > 0) ? (c->v_total_adjust - 1) : 0);
-
         bool need_adj = (c->v_total_adjust != 0) || c->odd_field;
         bool frame_end = (c->r_ctr == max_scan) &&
                          (c->in_vadj || (!need_adj && c->v_ctr == c->v_total));
@@ -131,7 +159,6 @@ mc6845_output_t mc6845_tick(mc6845_t *c)
             c->r_ctr = 0;
             c->v_ctr = 0;
             c->in_vadj = false;
-            c->v_de = true;
             c->ma_row_start = mc6845_get_start_addr(c);
             c->frame_count++;
 
@@ -150,11 +177,6 @@ mc6845_output_t mc6845_tick(mc6845_t *c)
             c->ma_row_start = (uint16_t)((c->ma_row_start + c->h_displayed) & 0x3FFF);
             c->v_ctr++;
 
-            if (c->v_ctr == c->v_displayed)
-            {
-                c->v_de = false;
-            }
-
             if (c->v_ctr == c->v_total && need_adj)
             {
                 c->in_vadj = true;
@@ -166,7 +188,6 @@ mc6845_output_t mc6845_tick(mc6845_t *c)
         }
 
         c->ma = c->ma_row_start;
-        c->h_de = true;
     }
     else
     {
@@ -174,10 +195,11 @@ mc6845_output_t mc6845_tick(mc6845_t *c)
         c->ma = (c->ma + 1) & 0x3FFF;
     }
 
+    /* Update display enable voor de volgende tick */
     c->h_de = (c->h_ctr < c->h_displayed);
     c->v_de = (c->v_ctr < c->v_displayed);
 
-    /* HSYNC detectie */
+    /* HSYNC evaluatie */
     if (c->hs)
     {
         if (c->hsync_ctr >= _hsync_width(c))
@@ -222,33 +244,6 @@ mc6845_output_t mc6845_tick(mc6845_t *c)
         }
     }
 
-    /* Latch cursor visibility across the raster lines of the cursor cell. */
-    c->cursor_on = false;
-    uint16_t cursor_addr = mc6845_get_cursor_addr(c);
-    if (c->h_de && c->v_de && c->ma == cursor_addr)
-    {
-        if (c->r_ctr == 0)
-            c->cursor_line_ff = false;
-        if (c->r_ctr == (c->cursor_start & 0x1F))
-            c->cursor_line_ff = true;
-
-        uint8_t cursor_mode = (c->cursor_start >> 5) & 0x03;
-        bool cursor_visible = cursor_mode == 0 ||
-                              (cursor_mode >= 2 && c->cursor_blink_state);
-        c->cursor_on = c->cursor_line_ff && cursor_visible;
-
-        if (c->r_ctr == (c->cursor_end & 0x1F))
-            c->cursor_line_ff = false;
-    }
-
-    /* ---- OUTPUT ---- */
-    mc6845_output_t out;
-    out.ma = c->ma & 0x3FFF;
-    out.ra = c->r_ctr & 0x1F;
-    out.display_enable = c->h_de && c->v_de;
-    out.hsync = c->hs;
-    out.vsync = c->vs;
-    out.cursor = c->cursor_on; /* <-- Was 'false', moet c->cursor_on zijn */
     return out;
 }
 

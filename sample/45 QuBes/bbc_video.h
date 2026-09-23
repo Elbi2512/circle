@@ -113,6 +113,8 @@ extern "C"
     /* CPU bus access — Video ULA (&FE20-&FE21) */
     void bbc_video_vidproc_write(bbc_video_t *video, uint8_t addr, uint8_t data);
 
+    void bbc_video_debug_trace_mode(void);
+
     void bbc_video_set_screen_base(bbc_video_t *video, uint32_t base);
 
     /* Tick — advance one CRTC clock cycle. */
