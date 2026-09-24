@@ -1,1 +1,0 @@
-CASEnable the Cassette I/O system at 300 baud. Be aware that if you try this, the `MAN statement doesn't work any longer because it depends on random files on your AtoMMC card. 

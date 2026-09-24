@@ -1,1 +1,0 @@
-LABDisplays an overview of used labels in a basic program.

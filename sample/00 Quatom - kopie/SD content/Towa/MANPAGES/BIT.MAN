@@ -1,1 +1,0 @@
-BIT <value>Prints the binary value of the given (hexadecimal) valueExample:    BIT #4C            BIT ?#BFFE

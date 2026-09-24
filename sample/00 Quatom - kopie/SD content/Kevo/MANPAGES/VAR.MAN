@@ -1,1 +1,0 @@
-VAR Variable dump 	 This statement shows the values of the variables A to Z. 

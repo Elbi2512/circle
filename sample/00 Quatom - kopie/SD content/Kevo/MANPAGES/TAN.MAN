@@ -1,1 +1,0 @@
-TAN Tanqent T.Returns tangent of angle in radians.Example:FPRINT TAN PI0.0

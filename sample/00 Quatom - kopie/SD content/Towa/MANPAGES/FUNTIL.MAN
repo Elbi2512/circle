@@ -1,1 +1,0 @@
-FUNTIL Ploating-point until FU.As `UNTIL, except no connectives ( `OR or `AND ) are allowed. Matches with `DO statement.Example:DO%A=%A+.1;FUNTIL%A>2

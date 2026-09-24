@@ -1,1 +1,0 @@
-UNLOCKThis statement will unlock the locked rom bank at #Axxx. You can also use SHIFT+RETURN to unlock, however this works only in direct mode.

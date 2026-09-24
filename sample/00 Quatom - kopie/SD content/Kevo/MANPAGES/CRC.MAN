@@ -1,1 +1,0 @@
-CRC <start>,<end>This statement calculates the crc checksum of the specified memory block.Example:     CRC #D000,#DFFF

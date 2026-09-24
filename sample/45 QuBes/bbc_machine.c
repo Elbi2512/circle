@@ -249,6 +249,15 @@ int bbc_machine_step(bbc_machine_t *m)
     if (cycles <= 0)
         cycles = 1;
 
+    bool deliver_drq_nmi = false;
+    if (m->fdc_drq_nmi_delay > 0)
+    {
+        m->fdc_drq_nmi_delay--;
+        deliver_drq_nmi = m->fdc_drq_nmi_delay == 0;
+    }
+    if (deliver_drq_nmi)
+        bbc_cpu_nmi(m->cpu);
+
     bbc_sysvia_tick(&m->sysvia, cycles);
     bbc_uservia_tick(&m->uservia, cycles);
     wd1770_tick(&m->fdc, cycles);
@@ -533,7 +542,8 @@ static void fdc_irq(void *ctx, bool state)
         }
         if (s_fdc_trace_commands <= 20)
             bbc_debug_log("FDC TRACE INTRQ bytes/sector", s_fdc_trace_bytes, m->fdc.sector);
-        bbc_cpu_nmi(m->cpu);
+        if (m->fdc_drq_nmi_delay == 0)
+            m->fdc_drq_nmi_delay = 2;
     }
 }
 

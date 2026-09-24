@@ -1,1 +1,0 @@
-HVARDisplays all integer variables with their hexadecimal value

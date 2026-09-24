@@ -1,1 +1,0 @@
-SQR Square rootReturns square root of argument.Example:FPRINT SQR 21.41421356

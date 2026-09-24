@@ -1,1 +1,0 @@
-PIReturns the constant pi.Example:FPRINT PI3.14159265
