@@ -20,14 +20,6 @@ static void sv_sound_write(void *ctx, uint8_t data);
 static bool sv_keyboard_read(void *ctx, uint8_t row, uint8_t col);
 static void sv_latch_changed(void *ctx, uint8_t latch_bits);
 static void sv_irq(void *ctx, bool state);
-static int s_fdc_trace_count = 0;
-static unsigned s_fdc_trace_commands = 0;
-static unsigned s_fdc_trace_bytes = 0;
-static unsigned s_fdc_nmi_trace = 0;
-static unsigned s_fdc_write_trace = 0;
-static unsigned s_fdc_write_irq_trace = 0;
-static unsigned s_fdc_write_status_trace = 0;
-static unsigned s_fdc_write_cpu_trace = 0;
 
 /* uservia callbacks */
 static void uv_port_out(void *ctx, uint8_t port, uint8_t val, uint8_t ddr);
@@ -188,7 +180,9 @@ void bbc_machine_reset(bbc_machine_t *m)
     m->irq.sysvia = false;
     m->irq.uservia = false;
     m->irq.acia = false;
-    m->cycle_acc = 0;
+    /* Start the 1 MHz VIA clock half a CPU cycle ahead of the 1 MHz CRTC
+     * phase; this matches the board-level clock phase at raster IRQ edges. */
+    m->cycle_acc = 1;
 
     if (m->fb_output)
     {
@@ -219,7 +213,7 @@ void bbc_machine_break(bbc_machine_t *m, bool shift_held)
     m->irq.sysvia = false;
     m->irq.uservia = false;
     m->irq.acia = false;
-    m->cycle_acc = 0;
+    m->cycle_acc = 1;
     m->crtc_acc = 0;
 
     if (m->fb_output)
@@ -236,30 +230,27 @@ void bbc_machine_break(bbc_machine_t *m, bool shift_held)
 
 int bbc_machine_step(bbc_machine_t *m)
 {
-    if (s_fdc_trace_count > 0)
-    {
-        uint16_t pc = bbc_cpu_get_pc(m->cpu);
-        uint8_t *ram = bbc_memory_get_ram(m->mem);
-        uint8_t op = ram ? ram[pc] : 0xFF;
-    //    bbc_debug_log("STEP: PC, Opcode =", (unsigned)pc, (unsigned)op);
-        s_fdc_trace_count--;
-    }
-
     int cycles = bbc_cpu_step(m->cpu);
     if (cycles <= 0)
         cycles = 1;
 
-    bool deliver_drq_nmi = false;
-    if (m->fdc_drq_nmi_delay > 0)
+    /* Do not nest a DRQ NMI inside the DFS NMI handler.  The 6502 I flag is
+     * set for the handler and cleared by RTI; deliver the pending request
+     * only after that return. */
+    if (m->fdc_drq_nmi_pending && !(bbc_cpu_get_p(m->cpu) & 0x04))
     {
-        m->fdc_drq_nmi_delay--;
-        deliver_drq_nmi = m->fdc_drq_nmi_delay == 0;
-    }
-    if (deliver_drq_nmi)
+        m->fdc_drq_nmi_pending = false;
         bbc_cpu_nmi(m->cpu);
+    }
 
-    bbc_sysvia_tick(&m->sysvia, cycles);
-    bbc_uservia_tick(&m->uservia, cycles);
+    /* The CPU runs at 2 MHz; both VIAs are clocked at 1 MHz. */
+    m->cycle_acc += cycles;
+    while (m->cycle_acc >= 2)
+    {
+        bbc_sysvia_tick(&m->sysvia, 1);
+        bbc_uservia_tick(&m->uservia, 1);
+        m->cycle_acc -= 2;
+    }
     wd1770_tick(&m->fdc, cycles);
     bbc_tape_tick(&m->tape, cycles);
 
@@ -433,10 +424,6 @@ static void io_vidproc_write(uint16_t addr, uint8_t val, void *ctx)
 {
     bbc_machine_t *m = (bbc_machine_t *)ctx;
     bbc_video_vidproc_write(&m->video, (uint8_t)(addr & 1), val);
-    if (!(addr & 1)) {
-        bbc_video_debug_trace_mode();
-      // bbc_debug_log("ULA FE20 write: val, 2mhz =", val, m->video.ula.crtc_2mhz);
-    }
 }
 
 static uint8_t io_sysvia_read(uint16_t addr, void *ctx)
@@ -528,22 +515,10 @@ static void fdc_irq(void *ctx, bool state)
 
     if (state)
     {
-        if ((m->fdc.command & 0xE0) == 0xA0 && s_fdc_write_irq_trace < 8)
-        {
-            bbc_debug_log("FDC WRITE INTRQ pc/sector", (unsigned)bbc_cpu_get_pc(m->cpu),
-                          ((unsigned)m->fdc.command << 8) | m->fdc.sector);
-            s_fdc_write_irq_trace++;
-        }
-        if (s_fdc_nmi_trace < 32)
-        {
-            bbc_debug_log("FDC INTRQ NMI pc", (unsigned)bbc_cpu_get_pc(m->cpu),
-                          ((unsigned)m->fdc.track << 8) | m->fdc.sector);
-            s_fdc_nmi_trace++;
-        }
-        if (s_fdc_trace_commands <= 20)
-            bbc_debug_log("FDC TRACE INTRQ bytes/sector", s_fdc_trace_bytes, m->fdc.sector);
-        if (m->fdc_drq_nmi_delay == 0)
-            m->fdc_drq_nmi_delay = 2;
+        /* A completed command supersedes any DRQ edge left from its final
+         * byte; do not deliver that stale NMI after the INTRQ handler. */
+        m->fdc_drq_nmi_pending = false;
+        bbc_cpu_nmi(m->cpu);
     }
 }
 
@@ -553,13 +528,7 @@ static void fdc_drq(void *ctx, bool state)
 
     if (state && !m->fdc_drq_state)
     {
-        if (s_fdc_nmi_trace < 32)
-        {
-            bbc_debug_log("FDC DRQ NMI pc", (unsigned)bbc_cpu_get_pc(m->cpu),
-                          ((unsigned)m->fdc.track << 8) | m->fdc.sector);
-            s_fdc_nmi_trace++;
-        }
-        bbc_cpu_nmi(m->cpu);
+        m->fdc_drq_nmi_pending = true;
     }
 
     m->fdc_drq_state = state;
@@ -579,13 +548,6 @@ static uint8_t io_fdc_read(uint16_t addr, void *ctx)
     if (reg == 0) // &FE84: Acorn 1770 Status / DRQ Latch
     {
         uint8_t raw = wd1770_read(&m->fdc, 0);
-        if ((m->fdc.command & 0xE0) == 0xA0 && s_fdc_write_status_trace < 16)
-        {
-            bbc_debug_log("FDC WRITE status/pc", (unsigned)bbc_cpu_get_pc(m->cpu), raw);
-            s_fdc_write_status_trace++;
-        }
-        if (s_fdc_trace_commands <= 20 && !(raw & WD1770_STATUS_BUSY))
-            bbc_debug_log("FDC TRACE idle status/bytes", raw, s_fdc_trace_bytes);
 
         /* The BBC interface exposes DRQ as an active-low bit 7 latch. */
         return (raw & 0x7F) | (m->fdc_drq_state ? 0 : 0x80);
@@ -601,19 +563,7 @@ static uint8_t io_fdc_read(uint16_t addr, void *ctx)
             return m->fdc.data;
         }
 
-        static int byte_count = 0;
-        byte_count++;
-        if (byte_count == 1 || byte_count == 256)
-        {
-           // bbc_debug_log("FDC Data gelezen: byte nr, PC =", (unsigned)byte_count, (unsigned)bbc_cpu_get_pc(m->cpu));
-            if (byte_count == 256)
-                byte_count = 0;
-        }
-
         m->fdc_drq_state = false;
-        s_fdc_trace_bytes++;
-        if (s_fdc_trace_commands <= 20 && s_fdc_trace_bytes == 256)
-            bbc_debug_log("FDC TRACE 256 bytes/sector", m->fdc.sector, m->fdc.status);
         return wd1770_read(&m->fdc, 3);
     }
 
@@ -640,24 +590,9 @@ static void io_fdc_write(uint16_t addr, uint8_t val, void *ctx)
 
     if (reg == 0) // &FE84: Command register
     {
-        bbc_debug_log("FDC Command gestart: cmd =", (unsigned)val, (unsigned)bbc_cpu_get_pc(m->cpu));
-
-        if (s_fdc_trace_commands < 20)
-        {
-            bbc_debug_log("FDC TRACE cmd/track/sector",
-                          ((unsigned)val << 16) | ((unsigned)m->fdc.track << 8) | m->fdc.sector,
-                          s_fdc_trace_bytes);
-        }
-        s_fdc_trace_commands++;
-        s_fdc_trace_bytes = 0;
-
-        if ((val & 0xE0) == 0x80) // Read sector commando
-        {
-       //     s_fdc_trace_count = 60; // Traceer direct de eerstvolgende 60 CPU instructies
-        }
-
         m->fdc.intrq = false;
         m->fdc_drq_state = false;
+        m->fdc_drq_nmi_pending = false;
         wd1770_write(&m->fdc, 0, val);
     }
     else if (reg == 1) // &FE85: Track register
@@ -671,16 +606,6 @@ static void io_fdc_write(uint16_t addr, uint8_t val, void *ctx)
     }
     else if (reg == 3) // &FE87: Data register
     {
-        if ((m->fdc.command & 0xE0) == 0xA0 && s_fdc_write_cpu_trace < 8)
-        {
-            bbc_debug_log("FDC WRITE byte/pos/cmd", m->fdc.buf_pos,
-                          ((unsigned)m->fdc.command << 8) | val);
-            bbc_debug_log("FDC WRITE cpu/axy", (unsigned)bbc_cpu_get_pc(m->cpu),
-                          ((unsigned)bbc_cpu_get_a(m->cpu) << 16) |
-                          ((unsigned)bbc_cpu_get_x(m->cpu) << 8) |
-                          bbc_cpu_get_y(m->cpu));
-            s_fdc_write_cpu_trace++;
-        }
         m->fdc_drq_state = false;
         wd1770_write(&m->fdc, 3, val);
     }

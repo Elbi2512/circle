@@ -65,21 +65,25 @@ static const bbc_rgb_t s_colour_table[8] = {
  * -------------------------------------------------------------------------- */
 void bbc_video_ula_rebuild_tables(bbc_video_ula_t *ula)
 {
-    /* 1bpp (MODE 0, 3, 4, 6): the pixel selects logical colour 0 or 1. */
+    /* 1bpp (MODE 0, 3, 4, 6): MOS programs the full 4-bit palette nibble,
+     * writing entries 0-7 to one colour and 8-15 to the other, so only the
+     * top bit of the logical index (bit 3) is actually significant. */
     for (int byte = 0; byte < 256; byte++) {
         for (int px = 0; px < 8; px++) {
             uint8_t bit = (byte >> (7 - px)) & 1;
-            uint8_t logical = bit;
+            uint8_t logical = bit << 3;
             ula->lut_1bpp[byte][px] = ula->palette[logical];
         }
     }
 
-    /* 2bpp (MODE 1, 5): interleaved high and low pixel bits. */
+    /* 2bpp (MODE 1, 5): MOS spreads the two significant bits at nibble
+     * positions 3 and 1 (bits 2 and 0 are redundant/noise in real palette
+     * writes), not packed into the low 2 bits. */
     for (int byte = 0; byte < 256; byte++) {
         for (int px = 0; px < 4; px++) {
             uint8_t high = (byte >> (7 - px)) & 1;  /* bits 7,6,5,4 */
             uint8_t low  = (byte >> (3 - px)) & 1;  /* bits 3,2,1,0 */
-            uint8_t logical = (high << 1) | low;
+            uint8_t logical = (high << 3) | (low << 1);
             ula->lut_2bpp[byte][px] = ula->palette[logical];
         }
     }
@@ -144,8 +148,17 @@ void bbc_video_ula_write(bbc_video_ula_t *ula, uint8_t addr, uint8_t data)
         ula->crtc_2mhz   = (data & ULA_CTRL_CRTC_2MHZ) != 0;
 
         uint8_t bpp_field = (data & ULA_CTRL_BPP_MASK) >> ULA_CTRL_BPP_SHIFT;
-        ula->bpp_mode = bpp_field;
-        switch (bpp_field) {
+        /* Hardware quirk: bits 3-2 encode the CRTC "pixel rate" class
+         * (2/4/8/16 MHz for raw 0..3), not bpp directly, so the actual bpp
+         * also depends on bit 4 (CRTC clock). Real MOS control bytes:
+         *   2 MHz (80 col): MODE 0/3 raw=3 (1bpp), MODE 1 raw=2 (2bpp), MODE 2 raw=1 (4bpp)
+         *   1 MHz (40 col): MODE 4/6 raw=2 (1bpp), MODE 5 raw=1 (2bpp)
+         * giving bpp_mode = (crtc_2mhz ? 3 : 2) - raw_field. */
+        int bpp_mode = (ula->crtc_2mhz ? 3 : 2) - (int)bpp_field;
+        if (bpp_mode < 0) bpp_mode = 0;
+        if (bpp_mode > 3) bpp_mode = 3;
+        ula->bpp_mode = (uint8_t)bpp_mode;
+        switch (ula->bpp_mode) {
             case ULA_BPP_1: ula->pixels_per_byte = 8; break;
             case ULA_BPP_2: ula->pixels_per_byte = 4; break;
             case ULA_BPP_4: ula->pixels_per_byte = 2; break;

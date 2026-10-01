@@ -140,6 +140,28 @@ struct BbcKeyPos
     uint8_t col;
 };
 
+/* Key events are captured on Core 0 (USB HID callback context) but must only
+ * be applied to the shared bbc_machine_t/VIA state on Core 1 (the core that
+ * ticks the 6502/VIA emulation). Without this hand-off, concurrent access to
+ * the VIA's CA2 edge-detect state from two cores can silently lose key
+ * transitions. Use a lock-free single-producer/single-consumer ring buffer. */
+#define BBC_KEY_QUEUE_SIZE 32u /* must be a power of two */
+#define BBC_KEY_QUEUE_MASK (BBC_KEY_QUEUE_SIZE - 1u)
+
+enum
+{
+    BBC_KEY_EVT_NORMAL = 0,
+    BBC_KEY_EVT_BREAK = 1,
+};
+
+struct BbcKeyEvent
+{
+    uint8_t type;
+    uint8_t row;
+    uint8_t col;
+    bool pressed;
+};
+
 class CBeebRunner : public CMultiCoreSupport
 {
 public:
@@ -170,6 +192,8 @@ private:
     static void DiskSeek(void *user_ctx, uint8_t drive, uint8_t track);
 
     static BbcKeyPos ConvertHIDToBBCKey(uint8_t hidCode);
+    static void PushKeyEvent(const BbcKeyEvent &ev);
+    void DrainKeyQueue(void);
 
     CBcmFrameBuffer *m_pFrameBuffer;
     CTimer *m_pTimer;
@@ -183,6 +207,10 @@ private:
     bbc_machine_t m_Machine;
     bbc_circle_disk_ctx_t m_Disk[2];
     uint8_t m_RowBuf[BBC_BUF_W];
+
+    static BbcKeyEvent s_KeyQueue[BBC_KEY_QUEUE_SIZE];
+    static volatile uint32_t s_KeyQueueHead;
+    static volatile uint32_t s_KeyQueueTail;
 
     static CBeebRunner *s_pThis;
 };

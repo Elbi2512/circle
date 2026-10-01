@@ -185,7 +185,6 @@ static void finish_write_sector(wd1770_t *fdc, bool complete_command)
         fault(fdc, WD1770_STATUS_RNF, "write sector failed");
     else if (complete_command)
     {
-        bbc_debug_log("FDC WRITE complete sector/bytes", fdc->sector, fdc->buf_pos);
         completed(fdc);
     }
     else

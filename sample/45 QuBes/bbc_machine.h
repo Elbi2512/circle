@@ -109,7 +109,7 @@ typedef struct {
      * The Acorn 1770 DFS NMI handler reads &FE84 to distinguish INTRQ
      * (command complete) from DRQ (data byte ready). bit7=0 → DRQ active. */
     bool             fdc_drq_state;
-    uint8_t          fdc_drq_nmi_delay;
+    bool             fdc_drq_nmi_pending;
 
     /* Last value written to the &FE84 drive-select latch.
      * Bits 0-3 are readable back (drive/side/density selects). */

@@ -19,6 +19,10 @@ extern "C" void bbc_debug_log(const char *msg, unsigned val1, unsigned val2)
 
 CBeebRunner *CBeebRunner::s_pThis = nullptr;
 
+BbcKeyEvent CBeebRunner::s_KeyQueue[BBC_KEY_QUEUE_SIZE];
+volatile uint32_t CBeebRunner::s_KeyQueueHead = 0;
+volatile uint32_t CBeebRunner::s_KeyQueueTail = 0;
+
 static const u64 FRAME_TIME_US = 20000; // 50 Hz (PAL BBC timing)
 static const u64 MAX_CATCHUP_US = FRAME_TIME_US * 5;
 
@@ -158,9 +162,8 @@ int CBeebRunner::DiskWriteSector(void *user_ctx,
 
     f_sync(&ctx->file);
 
-    CLogger::Get()->Write(FromDisk, LogNotice,
-                          "Disk Write OK: Trk=%u Sec=%u head=%02X%02X tail=%02X%02X (Offset 0x%05X)",
-                          track, sector, buf[0], buf[1], buf[254], buf[255], (unsigned)offset);
+    CLogger::Get()->Write(FromDisk, LogNotice, "Disk Write OK: Trk=%u Sec=%u (Offset 0x%05X)",
+                          track, sector, (unsigned)offset);
 
     return 0;
 }
@@ -675,7 +678,7 @@ boolean CBeebRunner::Initialize(void)
     bbc_machine_load_sideways_rom(&m_Machine, dfs1770_rom, dfs_size, 14);
 
     //  MountSDDiskImage();
-    MountDisk("SD:/Welcome.ssd", 0); // later nog met menu'tje..
+    MountDisk("SD:/ELITE-1.SSD", 0); // later nog met menu'tje..
     bbc_machine_reset(&m_Machine);
 
     boolean bOK = CMultiCoreSupport::Initialize();
@@ -720,6 +723,8 @@ void CBeebRunner::RenderBBCFrame(void)
     // Centreren op het HDMI-scherm (creëert automatisch een nette border rondom)
     u32 startX = (fbWidth > renderW) ? (fbWidth - renderW) / 2 : 0;
     u32 startY = (fbHeight > renderH) ? (fbHeight - renderH) / 2 : 0;
+
+    bbc_video_begin_render(&m_Machine.video);
 
     for (u32 srcY = 0; srcY < srcH; srcY++)
     {
@@ -823,11 +828,20 @@ void CBeebRunner::Run(unsigned nCore)
                 nNextFrameTime = nCurrentTime;
             }
 
-            // 2 MHz = 40.000 cycles per 50 Hz (20 ms) frame
+            // 2 MHz = 40.000 cycles per 50 Hz (20 ms) frame, drained in chunks so
+            // queued key events (pushed from Core 0) are applied with low
+            // latency instead of only once per 20 ms frame.
             int cyclesBudget = 40000;
             while (cyclesBudget > 0)
             {
-                cyclesBudget -= bbc_machine_step(&m_Machine);
+                DrainKeyQueue();
+                int chunk = 2000;
+                while (chunk > 0 && cyclesBudget > 0)
+                {
+                    int used = bbc_machine_step(&m_Machine);
+                    cyclesBudget -= used;
+                    chunk -= used;
+                }
             }
 
             nNextFrameTime += FRAME_TIME_US;
@@ -894,6 +908,36 @@ void CBeebRunner::Run(unsigned nCore)
     }
 }
 
+void CBeebRunner::PushKeyEvent(const BbcKeyEvent &ev)
+{
+    /* Producer: called only from Core 0 (USB HID callback context). */
+    uint32_t head = s_KeyQueueHead;
+    uint32_t next = (head + 1u) & BBC_KEY_QUEUE_MASK;
+    if (next == s_KeyQueueTail)
+        return; /* queue full — drop rather than corrupt state */
+
+    s_KeyQueue[head] = ev;
+    asm volatile("dmb sy" ::: "memory");
+    s_KeyQueueHead = next;
+}
+
+void CBeebRunner::DrainKeyQueue(void)
+{
+    /* Consumer: called only from Core 1 (the core that ticks the CPU/VIA). */
+    while (s_KeyQueueTail != s_KeyQueueHead)
+    {
+        BbcKeyEvent ev = s_KeyQueue[s_KeyQueueTail];
+        asm volatile("dmb sy" ::: "memory");
+
+        if (ev.type == BBC_KEY_EVT_BREAK)
+            bbc_machine_break(&m_Machine, ev.pressed);
+        else
+            bbc_machine_key_event(&m_Machine, ev.row, ev.col, ev.pressed);
+
+        s_KeyQueueTail = (s_KeyQueueTail + 1u) & BBC_KEY_QUEUE_MASK;
+    }
+}
+
 void CBeebRunner::KeyStatusHandlerRaw(unsigned char ucModifiers, const unsigned char RawKeys[6])
 {
     if (!s_pThis)
@@ -903,15 +947,13 @@ void CBeebRunner::KeyStatusHandlerRaw(unsigned char ucModifiers, const unsigned 
     static BbcKeyPos s_activePos[6] = {
         {0xFF, 0xFF}, {0xFF, 0xFF}, {0xFF, 0xFF}, {0xFF, 0xFF}, {0xFF, 0xFF}, {0xFF, 0xFF}};
 
-    bbc_machine_t *m = &s_pThis->m_Machine;
-
     // 1. Modifiers (Shift en Ctrl)
     // In bbc_machine.c verwacht bbc_machine_key_event(m, row, col, pressed)
     // Row 0, Col 0 = Shift | Row 0, Col 1 = Ctrl
     bool bShift = (ucModifiers & 0x22) != 0;
     bool bCtrl = (ucModifiers & 0x11) != 0;
-    bbc_machine_key_event(m, 0, 0, bShift);
-    bbc_machine_key_event(m, 0, 1, bCtrl);
+    PushKeyEvent({BBC_KEY_EVT_NORMAL, 0, 0, bShift});
+    PushKeyEvent({BBC_KEY_EVT_NORMAL, 0, 1, bCtrl});
 
     // 2. KEY-UP detectie: toetsen die niet langer in het HID-rapport staan
     for (int i = 0; i < 6; i++)
@@ -936,8 +978,7 @@ void CBeebRunner::KeyStatusHandlerRaw(unsigned char ucModifiers, const unsigned 
             if (pos.row != 0xFF && pos.col != 0xFF)
             {
                 // Let op: pos.col wordt row (0..7) en pos.row wordt col (0..9) voor de emulator
-                bbc_machine_key_event(m, pos.col, pos.row, false);
-                CLogger::Get()->Write(FromBeeb, LogNotice, "Key UP: Row=%d Col=%d (HID 0x%02X)", pos.row, pos.col, activeHID);
+                PushKeyEvent({BBC_KEY_EVT_NORMAL, pos.col, pos.row, false});
             }
             s_activeHID[i] = 0;
             s_activePos[i] = {0xFF, 0xFF};
@@ -965,8 +1006,7 @@ void CBeebRunner::KeyStatusHandlerRaw(unsigned char ucModifiers, const unsigned 
             }
             if (!alreadyDown)
             {
-                CLogger::Get()->Write(FromBeeb, LogNotice, "F12 ingedrukt: Hardware BREAK");
-                bbc_machine_break(m, bShift);
+                PushKeyEvent({BBC_KEY_EVT_BREAK, 0, 0, bShift});
                 for (int i = 0; i < 6; i++)
                 {
                     if (s_activeHID[i] == 0)
@@ -1013,8 +1053,7 @@ void CBeebRunner::KeyStatusHandlerRaw(unsigned char ucModifiers, const unsigned 
                 }
 
                 // Let op: pos.col wordt row (0..7) en pos.row wordt col (0..9) voor de emulator
-                bbc_machine_key_event(m, pos.col, pos.row, true);
-                // CLogger::Get()->Write(FromBeeb, LogNotice, "Key DOWN: HID 0x%02X -> Row=%d Col=%d", hid, pos.row, pos.col);
+                PushKeyEvent({BBC_KEY_EVT_NORMAL, pos.col, pos.row, true});
             }
         }
     }

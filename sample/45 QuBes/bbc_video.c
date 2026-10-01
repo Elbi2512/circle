@@ -24,17 +24,12 @@ static uint8_t s_bbc_screen[2][BBC_INTERNAL_H][BBC_INTERNAL_W];
 static uint8_t s_mode7_screen[2][BBC_MODE7_H][BBC_MODE7_W];
 static volatile uint8_t s_display_buffer = 0;
 static uint8_t s_render_buffer = 1;
+static uint8_t s_frame_read_buffer = 0;
 
 static uint8_t s_current_scanline[BBC_INTERNAL_W];
 static int s_raster_y = 0;
 static int s_vis_col = 0;
 static saa5050_line_state_t s_mode7_ls;
-static unsigned s_bitmap_trace_count = 0;
-
-void bbc_video_debug_trace_mode(void)
-{
-    s_bitmap_trace_count = 0;
-}
 
 /*
 static inline uint32_t bbc_bitmap_ram_addr(uint16_t ma, uint8_t ra, uint32_t screen_base)
@@ -154,6 +149,7 @@ void bbc_video_reset(bbc_video_t *video)
 
     s_raster_y = 0;
     s_vis_col = 0;
+    s_frame_read_buffer = s_display_buffer;
 }
 
 void bbc_video_set_output(bbc_video_t *video, const bbc_video_output_t *output)
@@ -389,18 +385,6 @@ void bbc_video_tick(bbc_video_t *video)
     if (!video->system_ram)
         return;
 
-    if (!video->ula.teletext_mode && s_bitmap_trace_count < 128)
-    {
-        uint32_t trace_addr = bbc_bitmap_ram_addr(out.ma, out.ra, video->screen_base);
-        unsigned trace_byte = trace_addr < video->ram_size ? video->system_ram[trace_addr] : 0xFF;
-        bbc_debug_log("VIDEO MA/RA/H/DE", ((unsigned)out.ma << 16) |
-                                            ((unsigned)out.ra << 8) |
-                                            (unsigned)(cur_h & 0xFF),
-                      ((unsigned)(out.display_enable ? 1 : 0) << 31) |
-                      ((trace_addr & 0x7FFFu) << 8) | trace_byte);
-        s_bitmap_trace_count++;
-    }
-
     if (!out.display_enable)
         return;
 
@@ -448,7 +432,27 @@ void bbc_video_tick(bbc_video_t *video)
     }
 
     /* BITMAP MODES (MODE 0, 1, 2, 3, 4, 5, 6) -------------------- */
+
+    /* MODE 3/6 use extra scanlines (R9 > 7) as blank spacing between text
+     * rows; the address math wraps ra&7, so without this the spacer
+     * scanlines would re-read (and show a ghost of) the row's own top
+     * scanlines instead of being blank. */
+    if (cur_r & 8)
+    {
+        bool is_80_col_gap = (video->ula.control & 0x10) != 0;
+        int h_pixels_gap = is_80_col_gap ? 8 : 16;
+        int base_x_gap = col * h_pixels_gap;
+        for (int dst_px = 0; dst_px < h_pixels_gap; dst_px++)
+        {
+            int out_x = base_x_gap + dst_px;
+            if (out_x < BBC_INTERNAL_W)
+                s_current_scanline[out_x] = 0;
+        }
+        return;
+    }
+
     uint32_t ram_addr = bbc_bitmap_ram_addr(out.ma, out.ra, video->screen_base);
+
     if (ram_addr < video->ram_size)
     {
         uint8_t data_byte = video->system_ram[ram_addr];
@@ -484,6 +488,13 @@ void bbc_video_render_frame(bbc_video_t *video)
     {
         video->frame_cb(video->frame_ctx);
     }
+}
+
+void bbc_video_begin_render(const bbc_video_t *video)
+{
+    (void)video;
+    s_frame_read_buffer = s_display_buffer;
+    asm volatile("dmb sy" ::: "memory");
 }
 
 /* --------------------------------------------------------------------------
@@ -547,7 +558,7 @@ void bbc_video_render_row(const bbc_video_t *video,
             if (src_x >= SRC_W)
                 src_x = SRC_W - 1;
 
-            out_pixels[x] = s_mode7_screen[s_display_buffer][src_y][src_x] & 7;
+            out_pixels[x] = s_mode7_screen[s_frame_read_buffer][src_y][src_x] & 7;
         }
         return;
     }
@@ -558,5 +569,5 @@ void bbc_video_render_row(const bbc_video_t *video,
         src_y = BBC_INTERNAL_H - 1;
 
     int copy_w = (out_width < BBC_INTERNAL_W) ? out_width : BBC_INTERNAL_W;
-    memcpy(out_pixels, s_bbc_screen[s_display_buffer][src_y], copy_w);
+    memcpy(out_pixels, s_bbc_screen[s_frame_read_buffer][src_y], copy_w);
 }
