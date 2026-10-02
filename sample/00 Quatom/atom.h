@@ -41,8 +41,7 @@ public:
     void StopCore(unsigned coreId);
 
     void UpdateAnimation(void);
-    void DrawCurrentFrameCentered(u32 *pFB, u32 pitch, u32 startX, u32 startY, unsigned coreId);
-
+    void DrawCurrentFrameCentered(u32 *pFB, u32 pitch, u32 startX, u32 startY, unsigned targetW, unsigned targetH, unsigned coreId);
 private:
     u32 *volatile m_pFrames;
     int           m_TotalFrames;

@@ -262,6 +262,7 @@ int bbc_machine_step(bbc_machine_t *m)
         bbc_video_tick(&m->video);
         m->crtc_acc -= crtc_divider;
     }
+    logger_flush_now(); // ← hier
 
     return cycles;
 }
@@ -309,7 +310,7 @@ void bbc_machine_set_frame_callback(bbc_machine_t *m,
 static void sv_latch_changed(void *ctx, uint8_t latch_bits)
 {
     bbc_machine_t *m = (bbc_machine_t *)ctx;
-    static const uint32_t screen_bases[4] = { 0x4000, 0x6000, 0x3000, 0x5800 };
+    static const uint32_t screen_bases[4] = {0x4000, 0x6000, 0x3000, 0x5800};
     bbc_video_set_screen_base(&m->video, screen_bases[(latch_bits >> 4) & 3]);
     if (!(latch_bits & (1u << BBC_LATCH_SOUND_WE)))
     {

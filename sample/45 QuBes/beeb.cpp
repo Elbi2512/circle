@@ -12,9 +12,11 @@
 #define BBC_BUF_W 640 /* pixels per VGA line / BBC row */
 
 static const char FromBeeb[] = "beeb";
-extern "C" void bbc_debug_log(const char *msg, unsigned val1, unsigned val2)
+
+extern "C" void bbc_debug_log(const char *msg, unsigned v1, unsigned v2)
 {
-    CLogger::Get()->Write(FromBeeb, LogNotice, "%s %u, %u", msg, val1, val2);
+    CLogger::Get()->Write(FromBeeb, LogNotice, "%s %u %u", msg, v1, v2);
+     CTimer::SimpleMsDelay(1);
 }
 
 CBeebRunner *CBeebRunner::s_pThis = nullptr;
@@ -102,9 +104,9 @@ int CBeebRunner::DiskReadSector(void *user_ctx,
     static unsigned read_trace_count = 0;
     if (read_trace_count < 16)
     {
-        CLogger::Get()->Write(FromDisk, LogNotice,
-                              "Read trk=%u sec=%u side=%u bytes=%u head=%02X%02X",
-                              track, sector, side, bytesRead, buf[0], buf[1]);
+        //  CLogger::Get()->Write(FromDisk, LogNotice,
+        //                        "Read trk=%u sec=%u side=%u bytes=%u head=%02X%02X",
+        //                        track, sector, side, bytesRead, buf[0], buf[1]);
         read_trace_count++;
     }
 
@@ -686,6 +688,11 @@ boolean CBeebRunner::Initialize(void)
     {
         m_bCoreInitDone = TRUE;
     }
+    logger_init(10, 40); // steady 10 msgs/s, burst 40
+    logger_enable(true);
+    logger_log("TEST", 1, 2);
+    logger_flush_now();
+
     return bOK;
 }
 
@@ -767,47 +774,21 @@ void CBeebRunner::RenderBBCFrame(void)
     }
 }
 
+void bbc_video_debug_snapshot(bbc_video_t *video)
+{
+    const mc6845_t *crtc = &video->crtc;
+    uint16_t vr = ((uint16_t)crtc->v_ctr << 8) | crtc->r_ctr;
+    uint8_t ctl = video->ula.control;
+
+    // bbc_debug_log("SNAP", vr, ctl);
+}
+
 // ------------------------------------------------------------
 // Multi-core Run Loop
 // ------------------------------------------------------------
 void CBeebRunner::Run(unsigned nCore)
 {
-    /* Core 1: Dedicated BBC 6502 Emulator Loop (2 MHz clock pacing)
-    if (nCore == 1)
-    {
-        while (!m_bCoreInitDone)
-        {
-            asm volatile("dmb sy" ::: "memory");
-        }
 
-        CLogger::Get()->Write(FromBeeb, LogNotice, "Core 1: BBC 6502 CPU Task gestart (2 MHz)");
-
-        u64 nNextFrameTime = m_pTimer->GetClockTicks64();
-
-        while (!m_bShutdown)
-        {
-            u64 nCurrentTime = m_pTimer->GetClockTicks64();
-            if (nCurrentTime > nNextFrameTime + MAX_CATCHUP_US)
-            {
-                nNextFrameTime = nCurrentTime;
-            }
-
-            // 2 MHz = 40.000 cycles per 50 Hz (20 ms) frame
-            int cyclesBudget = 40000;
-            while (cyclesBudget > 0)
-            {
-                cyclesBudget -= bbc_machine_step(&m_Machine);
-            }
-
-            nNextFrameTime += FRAME_TIME_US;
-            while (m_pTimer->GetClockTicks64() < nNextFrameTime)
-            {
-                asm volatile("yield");
-            }
-        }
-        return;
-    }
-*/
     // Core 1: Dedicated BBC 6502 Emulator Loop (2 MHz clock pacing)
     if (nCore == 1)
     {
@@ -838,7 +819,15 @@ void CBeebRunner::Run(unsigned nCore)
                 int chunk = 2000;
                 while (chunk > 0 && cyclesBudget > 0)
                 {
+                    static unsigned dbg_counter = 0;
                     int used = bbc_machine_step(&m_Machine);
+                    dbg_counter += used;
+                    if (dbg_counter >= 2000) // bijvoorbeeld elke 2000 cycles
+                    {
+                        dbg_counter = 0;
+                        bbc_video_debug_snapshot(&m_Machine.video);
+                    }
+
                     cyclesBudget -= used;
                     chunk -= used;
                 }

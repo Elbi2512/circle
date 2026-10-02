@@ -82,6 +82,12 @@ extern "C"
 
         /* Statistics */
         uint32_t frames_rendered;
+        /* in bbc_video.h */
+        bool instrumentation_enabled;
+        uint32_t instrumentation_min_frames; /* default 2 */
+        int corrected_raster_y;
+
+
     } bbc_video_t;
 
     /* --------------------------------------------------------------------------

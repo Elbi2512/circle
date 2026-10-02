@@ -50,14 +50,14 @@ static const uint8_t s_default_palette[16] = {
  * BBC uses 3-bit RGB: bit 0=R, bit 1=G, bit 2=B
  * -------------------------------------------------------------------------- */
 static const bbc_rgb_t s_colour_table[8] = {
-    { 0,   0,   0   }, /* 0: Black   */
-    { 255, 0,   0   }, /* 1: Red     */
-    { 0,   255, 0   }, /* 2: Green   */
-    { 255, 255, 0   }, /* 3: Yellow  */
-    { 0,   0,   255 }, /* 4: Blue    */
-    { 255, 0,   255 }, /* 5: Magenta */
-    { 0,   255, 255 }, /* 6: Cyan    */
-    { 255, 255, 255 }, /* 7: White   */
+    {0, 0, 0},       /* 0: Black   */
+    {255, 0, 0},     /* 1: Red     */
+    {0, 255, 0},     /* 2: Green   */
+    {255, 255, 0},   /* 3: Yellow  */
+    {0, 0, 255},     /* 4: Blue    */
+    {255, 0, 255},   /* 5: Magenta */
+    {0, 255, 255},   /* 6: Cyan    */
+    {255, 255, 255}, /* 7: White   */
 };
 
 /* --------------------------------------------------------------------------
@@ -68,8 +68,10 @@ void bbc_video_ula_rebuild_tables(bbc_video_ula_t *ula)
     /* 1bpp (MODE 0, 3, 4, 6): MOS programs the full 4-bit palette nibble,
      * writing entries 0-7 to one colour and 8-15 to the other, so only the
      * top bit of the logical index (bit 3) is actually significant. */
-    for (int byte = 0; byte < 256; byte++) {
-        for (int px = 0; px < 8; px++) {
+    for (int byte = 0; byte < 256; byte++)
+    {
+        for (int px = 0; px < 8; px++)
+        {
             uint8_t bit = (byte >> (7 - px)) & 1;
             uint8_t logical = bit << 3;
             ula->lut_1bpp[byte][px] = ula->palette[logical];
@@ -79,18 +81,22 @@ void bbc_video_ula_rebuild_tables(bbc_video_ula_t *ula)
     /* 2bpp (MODE 1, 5): MOS spreads the two significant bits at nibble
      * positions 3 and 1 (bits 2 and 0 are redundant/noise in real palette
      * writes), not packed into the low 2 bits. */
-    for (int byte = 0; byte < 256; byte++) {
-        for (int px = 0; px < 4; px++) {
-            uint8_t high = (byte >> (7 - px)) & 1;  /* bits 7,6,5,4 */
-            uint8_t low  = (byte >> (3 - px)) & 1;  /* bits 3,2,1,0 */
+    for (int byte = 0; byte < 256; byte++)
+    {
+        for (int px = 0; px < 4; px++)
+        {
+            uint8_t high = (byte >> (7 - px)) & 1; /* bits 7,6,5,4 */
+            uint8_t low = (byte >> (3 - px)) & 1;  /* bits 3,2,1,0 */
             uint8_t logical = (high << 3) | (low << 1);
             ula->lut_2bpp[byte][px] = ula->palette[logical];
         }
     }
 
     /* 4bpp (MODE 2): Stuurt alle 4 de lijnen aan (bit3, bit2, bit1, bit0) */
-    for (int byte = 0; byte < 256; byte++) {
-        for (int px = 0; px < 2; px++) {
+    for (int byte = 0; byte < 256; byte++)
+    {
+        for (int px = 0; px < 2; px++)
+        {
             uint8_t b3 = (byte >> (7 - px)) & 1;
             uint8_t b2 = (byte >> (5 - px)) & 1;
             uint8_t b1 = (byte >> (3 - px)) & 1;
@@ -111,16 +117,17 @@ void bbc_video_ula_init(bbc_video_ula_t *ula)
     for (int i = 0; i < 8; i++)
         ula->colour_table[i] = s_colour_table[i];
     bbc_video_ula_reset(ula);
+    ula->trace_version = 0;
 }
 
 void bbc_video_ula_reset(bbc_video_ula_t *ula)
 {
-    ula->control       = 0;
+    ula->control = 0;
     ula->teletext_mode = false;
-    ula->bpp_mode      = ULA_BPP_1;
+    ula->bpp_mode = ULA_BPP_1;
     ula->pixels_per_byte = 8;
-    ula->crtc_2mhz     = false;
-    ula->flash_state   = false;
+    ula->crtc_2mhz = false;
+    ula->flash_state = false;
 
     /* Copy default palette */
     for (int i = 0; i < 16; i++)
@@ -128,11 +135,13 @@ void bbc_video_ula_reset(bbc_video_ula_t *ula)
 
     bbc_video_ula_rebuild_tables(ula);
     ULA_LOGD("reset");
+    ula->trace_version = 0;
 }
 
 void bbc_video_ula_write(bbc_video_ula_t *ula, uint8_t addr, uint8_t data)
 {
-    if (!(addr & 1)) {
+    if (!(addr & 1))
+    {
         /*
          * &FE20 — Control register
          *
@@ -142,10 +151,10 @@ void bbc_video_ula_write(bbc_video_ula_t *ula, uint8_t addr, uint8_t data)
          * Bit 4: CRTC 2 MHz (1 = 2 MHz, 0 = 1 MHz)
          * Bit 7: flash colour control
          */
-        ula->control     = data;
+        ula->control = data;
         ula->flash_state = (data & ULA_CTRL_FLASH_STATE) != 0;
         ula->teletext_mode = (data & ULA_CTRL_TELETEXT) != 0;
-        ula->crtc_2mhz   = (data & ULA_CTRL_CRTC_2MHZ) != 0;
+        ula->crtc_2mhz = (data & ULA_CTRL_CRTC_2MHZ) != 0;
 
         uint8_t bpp_field = (data & ULA_CTRL_BPP_MASK) >> ULA_CTRL_BPP_SHIFT;
         /* Hardware quirk: bits 3-2 encode the CRTC "pixel rate" class
@@ -155,20 +164,33 @@ void bbc_video_ula_write(bbc_video_ula_t *ula, uint8_t addr, uint8_t data)
          *   1 MHz (40 col): MODE 4/6 raw=2 (1bpp), MODE 5 raw=1 (2bpp)
          * giving bpp_mode = (crtc_2mhz ? 3 : 2) - raw_field. */
         int bpp_mode = (ula->crtc_2mhz ? 3 : 2) - (int)bpp_field;
-        if (bpp_mode < 0) bpp_mode = 0;
-        if (bpp_mode > 3) bpp_mode = 3;
+        if (bpp_mode < 0)
+            bpp_mode = 0;
+        if (bpp_mode > 3)
+            bpp_mode = 3;
         ula->bpp_mode = (uint8_t)bpp_mode;
-        switch (ula->bpp_mode) {
-            case ULA_BPP_1: ula->pixels_per_byte = 8; break;
-            case ULA_BPP_2: ula->pixels_per_byte = 4; break;
-            case ULA_BPP_4: ula->pixels_per_byte = 2; break;
-            default:        ula->pixels_per_byte = 1; break;
+        switch (ula->bpp_mode)
+        {
+        case ULA_BPP_1:
+            ula->pixels_per_byte = 8;
+            break;
+        case ULA_BPP_2:
+            ula->pixels_per_byte = 4;
+            break;
+        case ULA_BPP_4:
+            ula->pixels_per_byte = 2;
+            break;
+        default:
+            ula->pixels_per_byte = 1;
+            break;
         }
         /* Rebuild tables as flash_state affects palette output */
+        ula->trace_version++;
+        logger_log("ULAWR", (unsigned)ula->trace_version, (unsigned)data);
         bbc_video_ula_rebuild_tables(ula);
-        ULA_LOGD("ctrl=%02X teletext=%d bpp=%d 2mhz=%d",
-                 data, ula->teletext_mode, ula->pixels_per_byte, ula->crtc_2mhz);
-    } else {
+    }
+    else
+    {
         /*
          * &FE21 — Palette register
          *
@@ -179,11 +201,13 @@ void bbc_video_ula_write(bbc_video_ula_t *ula, uint8_t addr, uint8_t data)
          * before being stored. So physical = (data & 0x07) ^ 0x07.
          * This means writing 0 to bits 2-0 stores white, writing 7 stores black.
          */
-        uint8_t logical  = (data >> 4) & 0x0F;
+        uint8_t logical = (data >> 4) & 0x0F;
         uint8_t physical = (data & 0x07) ^ 0x07;
         ula->palette[logical] = physical;
+        ula->trace_version++;
+        logger_log("ULAWR", (unsigned)ula->trace_version, (unsigned)((logical << 8) | physical));
         bbc_video_ula_rebuild_tables(ula);
-        ULA_LOGD("palette[%d] = %d (raw=%02X)", logical, physical, data);
+        // ULA_LOGD("palette[%d] = %d (raw=%02X)", logical, physical, data);
     }
 }
 
@@ -192,31 +216,43 @@ int bbc_video_ula_serialize(const bbc_video_ula_t *ula,
                             uint8_t *out_colours,
                             bool cursor_active)
 {
+    /* --- MODE OVERRIDE --- */
+    uint8_t effective_bpp = ula->bpp_mode;
+
+    if (ula->force_mode4)
+        effective_bpp = ULA_BPP_1; // Mode 4 = 1bpp
+    else if (ula->force_mode5)
+        effective_bpp = ULA_BPP_2; // Mode 5 = 2bpp
+
     int n;
-    switch (ula->bpp_mode) {
-        case ULA_BPP_1:
-            n = 8;
-            for (int i = 0; i < 8; i++)
-                out_colours[i] = ula->lut_1bpp[data_byte][i];
-            break;
-        case ULA_BPP_2:
-            n = 4;
-            for (int i = 0; i < 4; i++)
-                out_colours[i] = ula->lut_2bpp[data_byte][i];
-            break;
-        case ULA_BPP_4:
-            n = 2;
-            for (int i = 0; i < 2; i++)
-                out_colours[i] = ula->lut_4bpp[data_byte][i];
-            break;
-        default:
-            n = 1;
-            out_colours[0] = ula->palette[data_byte & 0x0F];
-            break;
+    switch (effective_bpp)
+    {
+    case ULA_BPP_1:
+        n = 8;
+        for (int i = 0; i < 8; i++)
+            out_colours[i] = ula->lut_1bpp[data_byte][i];
+        break;
+
+    case ULA_BPP_2:
+        n = 4;
+        for (int i = 0; i < 4; i++)
+            out_colours[i] = ula->lut_2bpp[data_byte][i];
+        break;
+
+    case ULA_BPP_4:
+        n = 2;
+        for (int i = 0; i < 2; i++)
+            out_colours[i] = ula->lut_4bpp[data_byte][i];
+        break;
+
+    default:
+        n = 1;
+        out_colours[0] = ula->palette[data_byte & 0x0F];
+        break;
     }
 
-    /* Cursor: XOR physical colour with 7 = invert all 3 bits */
-    if (cursor_active) {
+    if (cursor_active)
+    {
         for (int i = 0; i < n; i++)
             out_colours[i] ^= 7;
     }

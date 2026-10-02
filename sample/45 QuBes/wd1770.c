@@ -82,7 +82,7 @@ static void completed(wd1770_t *fdc)
     fdc->delay_cycles = 0;
     set_intrq(fdc, true);
 
-    bbc_debug_log("FDC Command voltooid. Status =", (unsigned)fdc->status, 0);
+   // bbc_debug_log("FDC Command voltooid. Status =", (unsigned)fdc->status, 0);
 }
 
 static void fault(wd1770_t *fdc, uint8_t flags, const char *desc)

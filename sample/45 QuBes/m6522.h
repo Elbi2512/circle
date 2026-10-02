@@ -13,6 +13,7 @@
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
+#include "logger.h"
 
 #ifdef __cplusplus
 extern "C" {

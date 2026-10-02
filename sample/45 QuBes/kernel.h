@@ -19,6 +19,7 @@
 #include <circle/net/netsubsystem.h>
 #include <circle/types.h>
 #include <circle/fs/fat/fatfs.h>
+#include "logger.h"
 
 #include "beeb.h"
 

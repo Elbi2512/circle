@@ -5,10 +5,9 @@
 
 #define DBG(fmt, ...) CLogger::Get()->Write("DBG", LogDebug, fmt, ##__VA_ARGS__)
 
-static void RenderCoreQuadrantDirect(CBcmFrameBuffer &frameBuffer, unsigned nCoreId, const u8 *pLocalVRAM);
+static void RenderCoreQuadrantDirect(CBcmFrameBuffer &frameBuffer, unsigned nCoreId, const u8 *pLocalVRAM, bool bIgnoreAnim = false);
 static void RenderSingleCoreFullscreen(CBcmFrameBuffer &frameBuffer, unsigned nCoreId, const u8 *pLocalVRAM);
 static void RenderSingleCoreFullscreenText(CBcmFrameBuffer &frameBuffer, unsigned nCoreId, const u8 *pTextVRAM);
-
 static const char FromAtom[] = "atom";
 volatile bool g_bFullscreenMode = false;
 static volatile unsigned g_FullscreenCore = 0;
@@ -17,7 +16,17 @@ static unsigned g_SkipCounter[4] = {0, 0, 0, 0};
 static const u64 FRAME_TIME_US = 20000;
 static const u64 MAX_CATCHUP_US = FRAME_TIME_US * 5;
 static volatile unsigned g_nCoreLoad[4] = {0, 0, 0, 0};
-
+struct TQuadrantMetrics
+{
+  unsigned dstW;
+  unsigned dstH;
+  unsigned baseX[4];
+  unsigned baseY[4];
+  unsigned consoleX;
+  u32 stepX16;
+  u32 stepY16;
+};
+static TQuadrantMetrics GetQuadrantMetrics(CBcmFrameBuffer &frameBuffer);
 CWelcomeAnimation g_WelcomeAnim;
 CAtomRunner *CAtomRunner::s_pThis = nullptr;
 volatile unsigned CAtomRunner::m_nActiveCore = 0;
@@ -95,7 +104,7 @@ static void DrawVUMeter(CBcmFrameBuffer &fb, int x, int y, int width, int height
     u32 bgColor = 0xFF181818;
     // bool bCoreTurbo = s_pThis ? s_pThis->GetEmulator(c)->IsTurbo() : false;
     bool bCoreTurbo = CAtomRunner::Get() ? CAtomRunner::Get()->GetEmulator(c)->IsTurbo() : false;
-    
+
     // Randkleur: Cyaan bij Turbo, Wit bij actief normaal, Grijs bij inactief
     u32 borderColor = bHighlight ? (bCoreTurbo ? 0xFF00FFFF : 0xFFFFFFFF) : 0xFF7F7F7F;
     int borderSize = bHighlight ? 2 : 1;
@@ -596,17 +605,16 @@ void CWelcomeAnimation::UpdateAnimation(void)
   }
 }
 
-void CWelcomeAnimation::DrawCurrentFrameCentered(u32 *pFB, u32 pitch, u32 startX, u32 startY, unsigned coreId)
+void CWelcomeAnimation::DrawCurrentFrameCentered(u32 *pFB, u32 pitch, u32 startX, u32 startY, unsigned targetW, unsigned targetH, unsigned coreId)
 {
-  if (!m_pFrames || coreId >= 4)
+  if (!m_pFrames || coreId >= 4 || !pFB)
   {
     return;
   }
 
-  constexpr int WIN_W = 512;
-  constexpr int WIN_H = 384;
-  constexpr int offsetX = (WIN_W - ANIM_FRAME_W) / 2;
-  constexpr int offsetY = (WIN_H - ANIM_FRAME_H) / 2;
+  // Centreer het frame binnen de werkelijke afmetingen van het kwadrant
+  const int offsetX = ((int)targetW - (int)ANIM_FRAME_W) / 2;
+  const int offsetY = ((int)targetH - (int)ANIM_FRAME_H) / 2;
 
   int frameIdx = m_CurrentFrame[coreId];
   const u32 *pSrcFrame = &m_pFrames[frameIdx * ANIM_FRAME_PIXELS];
@@ -614,12 +622,17 @@ void CWelcomeAnimation::DrawCurrentFrameCentered(u32 *pFB, u32 pitch, u32 startX
 
   for (unsigned y = 0; y < ANIM_FRAME_H; y++)
   {
-    u32 *pDstRow = pFB + ((startY + offsetY + y) * pitch) + startX + offsetX;
+    int py = (int)startY + offsetY + (int)y;
+    int px = (int)startX + offsetX;
+
+    if (py < 0 || px < 0)
+      continue;
+
+    u32 *pDstRow = pFB + (py * pitch) + px;
     const u32 *pSrcRow = &pSrcFrame[y * ANIM_FRAME_W];
     memcpy(pDstRow, pSrcRow, rowBytes);
   }
 }
-
 // ------------------------------------------------------------
 // CAtomRunner Implementatie
 // ------------------------------------------------------------
@@ -683,7 +696,11 @@ boolean CAtomRunner::Initialize(void)
     s_InitializedVRAM[c] = false;
   }
 
-  m_pConsole = new CTextConsole(m_pFrameBuffer, 1040, 24, 0xFFFFFFFF, 0xFF080808);
+  // Layout ophalen via dezelfde centrale functie
+  TQuadrantMetrics metrics = GetQuadrantMetrics(*m_pFrameBuffer);
+
+  constexpr unsigned CONSOLE_Y = 24;
+  m_pConsole = new CTextConsole(m_pFrameBuffer, metrics.consoleX, CONSOLE_Y, 0xFFFFFFFF, 0xFF080808);
   if (m_pConsole != NULL)
   {
     SetKernel(CKernel::Get());
@@ -729,6 +746,7 @@ boolean CAtomRunner::Initialize(void)
         }
       }
 
+      // Initialiseer direct op het scherm via de dynamische renderer
       if (m_pFrameBuffer != nullptr && m_pFrameBuffer->GetBuffer() != 0)
       {
         u32 *pBuffer = (u32 *)(uintptr_t)m_pFrameBuffer->GetBuffer();
@@ -736,8 +754,8 @@ boolean CAtomRunner::Initialize(void)
 
         for (int core = 0; core < 4; core++)
         {
-          int baseX = (core & 1) ? 512 : 0;
-          int baseY = (core & 2) ? 384 : 0;
+          int baseX = metrics.baseX[core];
+          int baseY = metrics.baseY[core];
 
           const uint8_t *pVRAM = m_AtomEmulator[core].GetRAM() + 0x8000;
           const uint8_t *pFont = m_AtomEmulator[core].GetVIDEO().GetFontData();
@@ -752,9 +770,12 @@ boolean CAtomRunner::Initialize(void)
                 &pVRAM[row * 32], pFont, textBgColor);
           }
 
+          s_InitializedVRAM[core] = false;
           m_AtomEmulator[core].ForceFullRedraw();
         }
       }
+      // Geef de HDMI-output en het oog even de tijd om het opstartscherm te tonen
+      m_pTimer->SimpleMsDelay(600);
     }
   }
 
@@ -854,7 +875,9 @@ void CAtomRunner::Run(unsigned nCore)
       if (nCurrentTime - nLastVUTime >= 250000)
       {
         nLastVUTime = nCurrentTime;
-        const int barX = (2 * 512) + 10;
+        // In CAtomRunner::Run (onderaan bij het tekenen van de VU meter):
+        const TQuadrantMetrics metrics = GetQuadrantMetrics(*m_pFrameBuffer);
+        const int barX = metrics.consoleX;
         const int barY = m_pFrameBuffer->GetHeight() - 50;
         DrawVUMeter(*m_pFrameBuffer, barX, barY, 325, 40, g_nCoreLoad, s_pThis->m_nActiveCore);
       }
@@ -912,17 +935,17 @@ void CAtomRunner::KeyStatusHandlerRaw(unsigned char ucModifiers, const unsigned 
       }
       continue;
     }
-// F11 -> Toggle Turbo Mode (1 MHz <-> 5 MHz) voor de momenteel actieve core
+    // F11 -> Toggle Turbo Mode (1 MHz <-> 5 MHz) voor de momenteel actieve core
     if (hid == 0x44)
     {
       s_pThis->m_AtomEmulator[activeCore].ToggleTurbo();
       bool bNowTurbo = s_pThis->m_AtomEmulator[activeCore].IsTurbo();
 
-      CLogger::Get()->Write("KeyDebug", LogNotice, 
-          "F11: Turbo Mode op Core %u = %s (%s)", 
-          activeCore, 
-          bNowTurbo ? "AAN (5 MHz)" : "UIT (1 MHz)",
-          bNowTurbo ? "Warp Speed" : "Standaard");
+      CLogger::Get()->Write("KeyDebug", LogNotice,
+                            "F11: Turbo Mode op Core %u = %s (%s)",
+                            activeCore,
+                            bNowTurbo ? "AAN (5 MHz)" : "UIT (1 MHz)",
+                            bNowTurbo ? "Warp Speed" : "Standaard");
       continue;
     }
 
@@ -1170,7 +1193,7 @@ static void RenderSingleCoreFullscreenText(CBcmFrameBuffer &frameBuffer, unsigne
       if (rawByte & 0x40)
       {
         u32 blockColor = (rawByte & 0x80) ? Palette8[4] : Palette8[2];
-        u32 bgColor = (nCoreId == 1 || nCoreId == 2) ? Palette8[0] : Palette8[9];
+        u32 bgColor = (nCoreId == 1 || nCoreId == 2) ? Palette8[0] : Palette8[8];
 
         for (int cy = 0; cy < 12; cy++)
         {
@@ -1337,7 +1360,56 @@ static void RenderSingleCoreFullscreen(CBcmFrameBuffer &frameBuffer, unsigned nC
   }
 }
 
-static void RenderCoreQuadrantDirect(CBcmFrameBuffer &frameBuffer, unsigned nCoreId, const u8 *pLocalVRAM)
+static TQuadrantMetrics GetQuadrantMetrics(CBcmFrameBuffer &frameBuffer)
+{
+  constexpr int SRC_W = 256;
+  constexpr int SRC_H = 192;
+
+  const unsigned screenW = frameBuffer.GetWidth();
+  const unsigned screenH = frameBuffer.GetHeight();
+
+  // Beschikbare ruimte per kwadrant (kolom links)
+  // We reserveren minimaal 320px rechts voor de console en VU-meter
+  unsigned availW = (screenW > 640) ? ((screenW - 320) / 2) : (screenW / 2);
+  unsigned availH = screenH / 2;
+
+  // Bereken de maximale 4:3 (256x192) afmeting per kwadrant
+  TQuadrantMetrics m;
+  if (availW * SRC_H < availH * SRC_W)
+  {
+    m.dstW = availW;
+    m.dstH = (availW * SRC_H) / SRC_W;
+  }
+  else
+  {
+    m.dstH = availH;
+    m.dstW = (availH * SRC_W) / SRC_H;
+  }
+
+  // Zorg voor een veilige minimumgrootte
+  if (m.dstW < SRC_W)
+    m.dstW = SRC_W;
+  if (m.dstH < SRC_H)
+    m.dstH = SRC_H;
+
+  // Bereken vaste offsets per core (2 kolommen x 2 rijen strak aaneengesloten)
+  for (unsigned c = 0; c < 4; c++)
+  {
+    m.baseX[c] = (c & 1) ? m.dstW : 0;
+    m.baseY[c] = (c >= 2) ? m.dstH : 0;
+  }
+
+  // Console start direct rechts van de twee kwadranten (met 16px marge)
+  m.consoleX = (2 * m.dstW) + 16;
+
+  // Fixed-point stappen voor de scaler
+  m.stepX16 = ((u32)SRC_W << 16) / m.dstW;
+  m.stepY16 = ((u32)SRC_H << 16) / m.dstH;
+
+  return m;
+}
+
+static void RenderCoreQuadrantDirect(CBcmFrameBuffer &frameBuffer, unsigned nCoreId, const u8 *pLocalVRAM, bool bIgnoreAnim)
 {
   if (!pLocalVRAM)
     return;
@@ -1348,16 +1420,18 @@ static void RenderCoreQuadrantDirect(CBcmFrameBuffer &frameBuffer, unsigned nCor
 
   constexpr int SRC_W = 256;
   constexpr int SRC_H = 192;
-  constexpr int QW = 512;
+
+  TQuadrantMetrics m = GetQuadrantMetrics(frameBuffer);
 
   const int pitchWords = (int)(frameBuffer.GetPitch() / 4);
-  const int baseX = (nCoreId & 1) ? QW : 0;
-  const int baseY = (nCoreId & 2) ? 384 : 0;
+  const int baseX = m.baseX[nCoreId];
+  const int baseY = m.baseY[nCoreId];
 
-  if (g_WelcomeAnim.IsPlaying(nCoreId))
+  // Alleen animatie tekenen als we NIET in geforceerde VRAM-render zitten:
+  if (!bIgnoreAnim && g_WelcomeAnim.IsPlaying(nCoreId))
   {
     u32 *pQuadStart = pFB + (baseY * pitchWords) + baseX;
-    g_WelcomeAnim.DrawCurrentFrameCentered(pQuadStart, pitchWords, 0, 0, nCoreId);
+    g_WelcomeAnim.DrawCurrentFrameCentered(pQuadStart, pitchWords, 0, 0, m.dstW, m.dstH, nCoreId);
     s_InitializedVRAM[nCoreId] = false;
     CAtomRunner::Get()->GetEmulator(nCoreId)->ResetVRAMChanged();
     return;
@@ -1370,45 +1444,62 @@ static void RenderCoreQuadrantDirect(CBcmFrameBuffer &frameBuffer, unsigned nCor
     s_InitializedVRAM[nCoreId] = true;
   }
 
-  for (int y = 0; y < SRC_H; y++)
+  const bool bIsActiveCore = (!g_bFullscreenMode && nCoreId == CAtomRunner::m_nActiveCore);
+  const u32 activeTextBg = 0xFF222222;
+
+  u32 srcY16 = 0;
+  int prevSrcY = -1;
+
+  for (unsigned dy = 0; dy < m.dstH; dy++)
   {
-    const u8 *pSrcRow = &pLocalVRAM[y * SRC_W];
-    u8 *pLastRow = &pLastVRAM[y * SRC_W];
+    const int srcY = (int)(srcY16 >> 16);
+    const u8 *pSrcRow = &pLocalVRAM[srcY * SRC_W];
+    u8 *pLastRow = &pLastVRAM[srcY * SRC_W];
 
     bool lineChanged = forceFullRedraw || (memcmp(pSrcRow, pLastRow, SRC_W) != 0);
-    if (!lineChanged)
-      continue;
 
-    memcpy(pLastRow, pSrcRow, SRC_W);
-
-    u32 *pDstRow1 = pFB + ((baseY + (y * 2 + 0)) * pitchWords) + baseX;
-    u32 *pDstRow2 = pFB + ((baseY + (y * 2 + 1)) * pitchWords) + baseX;
-
-    bool bIsActiveCore = (!g_bFullscreenMode && nCoreId == CAtomRunner::m_nActiveCore);
-    u32 activeTextBg = 0xFF222222; // Subtiel donkergrijs
-
-    for (int x = 0; x < SRC_W; x++)
+    if (srcY != prevSrcY)
     {
-      u32 P = CAtomVideo::GetColorARGB(pSrcRow[x]);
-
-      // Als het zwart is en deze core is actief in window mode
-      if (P == Palette8[0])
+      if (lineChanged && !forceFullRedraw)
       {
-        if (bIsActiveCore)
-        {
-          P = activeTextBg;
-        }
-        else if (nCoreId == 1 || nCoreId == 2)
-        {
-          P = Palette8[8];
-        }
+        memcpy(pLastRow, pSrcRow, SRC_W);
       }
-
-      pDstRow1[x * 2 + 0] = P;
-      pDstRow1[x * 2 + 1] = P;
-      pDstRow2[x * 2 + 0] = P;
-      pDstRow2[x * 2 + 1] = P;
+      prevSrcY = srcY;
     }
+
+    if (lineChanged)
+    {
+      u32 *pDstRow = pFB + ((baseY + (int)dy) * pitchWords) + baseX;
+
+      u32 srcX16 = 0;
+      for (unsigned dx = 0; dx < m.dstW; dx++)
+      {
+        const int srcX = (int)(srcX16 >> 16);
+        u32 P = CAtomVideo::GetColorARGB(pSrcRow[srcX]);
+
+        if (P == Palette8[0])
+        {
+          if (bIsActiveCore)
+          {
+            P = activeTextBg;
+          }
+          else if (nCoreId == 1 || nCoreId == 2)
+          {
+            P = Palette8[8];
+          }
+        }
+
+        pDstRow[dx] = P;
+        srcX16 += m.stepX16;
+      }
+    }
+
+    srcY16 += m.stepY16;
+  }
+
+  if (forceFullRedraw)
+  {
+    memcpy(pLastVRAM, pLocalVRAM, SRC_W * SRC_H);
   }
 }
 
@@ -1447,15 +1538,12 @@ void CAtomRunner::ProcessEmulatorFrame(unsigned coreIdx)
   }
   else
   {
-    if (bAnimPlaying || gfxMode > 0)
+    const bool bVRAM = m_AtomEmulator[coreIdx].HasVRAMChanged();
+    if (bAnimPlaying || bVRAM || (++g_SkipCounter[coreIdx] >= 5))
     {
-      const bool bVRAM = m_AtomEmulator[coreIdx].HasVRAMChanged();
-      if (bAnimPlaying || bVRAM || (++g_SkipCounter[coreIdx] >= 5))
-      {
-        g_SkipCounter[coreIdx] = 0;
-        RenderCoreQuadrantDirect(*m_pFrameBuffer, coreIdx, m_AtomEmulator[coreIdx].GetVRAMPointer());
-        m_AtomEmulator[coreIdx].ResetVRAMChanged();
-      }
+      g_SkipCounter[coreIdx] = 0;
+      RenderCoreQuadrantDirect(*m_pFrameBuffer, coreIdx, m_AtomEmulator[coreIdx].GetVRAMPointer());
+      m_AtomEmulator[coreIdx].ResetVRAMChanged();
     }
   }
 

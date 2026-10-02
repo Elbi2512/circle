@@ -6,7 +6,7 @@ OBJS = main.o kernel.o beeb.o circle_stubs.o saa5050_font.o
 
 OBJS += bbc_machine.o bbc_memory.o bbc_cpu.o bbc_video.o bbc_video_ula.o \
         mc6845.o wd1770.o bbc_sysvia.o bbc_uservia.o bbc_tape.o \
-        sn76489.o saa5050.o vrEmu6502.o m6522.o
+        sn76489.o saa5050.o vrEmu6502.o m6522.o logger.o
 
 OBJS += os12_rom.o basic2_rom.o dfs1770_rom.o
 

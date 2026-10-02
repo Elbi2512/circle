@@ -123,7 +123,7 @@ mc6845_output_t mc6845_tick(mc6845_t *c)
     out.display_enable = c->h_de && c->v_de;
     out.hsync = c->hs;
     out.vsync = c->vs;
-
+logger_log("CRTC", (unsigned)out.ma, ((unsigned)out.ra << 8) | (out.display_enable ? 1u : 0u));
     /* Cursor evaluatie op huidige positie */
     c->cursor_on = false;
     uint16_t cursor_addr = mc6845_get_cursor_addr(c);
